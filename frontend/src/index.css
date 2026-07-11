@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+:root {
+  font-family: 'Pretendard', 'Noto Sans KR', 'Courier New', monospace, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #050B18;
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── 네온 글로우 텍스트 ── */
+.glow-cyan   { text-shadow: 0 0 8px #00E5FF, 0 0 24px rgba(0,229,255,0.55); }
+.glow-purple { text-shadow: 0 0 8px #8B5CF6, 0 0 24px rgba(139,92,246,0.55); }
+.glow-red    { text-shadow: 0 0 8px #FF4D4F, 0 0 24px rgba(255,77,79,0.55); }
+.glow-orange { text-shadow: 0 0 8px #FF8A3D, 0 0 24px rgba(255,138,61,0.55); }
+.glow-green  { text-shadow: 0 0 8px #00FF88, 0 0 24px rgba(0,255,136,0.55); }
+
+/* ── 네온 글로우 박스 ── */
+.box-glow-cyan   { box-shadow: 0 0 18px rgba(0,229,255,0.22), 0 0 48px rgba(0,229,255,0.07), inset 0 0 14px rgba(0,229,255,0.04); }
+.box-glow-red    { box-shadow: 0 0 18px rgba(255,77,79,0.35),  0 0 48px rgba(255,77,79,0.12); }
+.box-glow-purple { box-shadow: 0 0 18px rgba(139,92,246,0.22), 0 0 48px rgba(139,92,246,0.07); }
+.box-glow-orange { box-shadow: 0 0 18px rgba(255,138,61,0.25), 0 0 48px rgba(255,138,61,0.08); }
+
+/* ── 글래스모피즘 ── */
+.glass {
+  background: rgba(8, 20, 37, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(0, 229, 255, 0.16);
+}
+
+/* ── HUD 코너 데코 ── */
+.hud-corner { position: relative; }
+.hud-corner::before {
+  content: '';
+  position: absolute; top: 0; left: 0;
+  width: 12px; height: 12px;
+  border-top: 1.5px solid rgba(0,229,255,0.8);
+  border-left: 1.5px solid rgba(0,229,255,0.8);
+}
+.hud-corner::after {
+  content: '';
+  position: absolute; bottom: 0; right: 0;
+  width: 12px; height: 12px;
+  border-bottom: 1.5px solid rgba(0,229,255,0.8);
+  border-right: 1.5px solid rgba(0,229,255,0.8);
+}
+
+/* ── 이상징후 펄스 마커 ── */
+@keyframes pulseRing {
+  0%   { transform: translate(-50%,-50%) scale(1);   opacity: 0.8; }
+  100% { transform: translate(-50%,-50%) scale(4);   opacity: 0; }
+}
+@keyframes pulseRingD {
+  0%   { transform: translate(-50%,-50%) scale(1);   opacity: 0.5; }
+  100% { transform: translate(-50%,-50%) scale(2.8); opacity: 0; }
+}
+
+.anomaly-marker-wrap {
+  position: relative;
+  width: 12px; height: 12px;
+  cursor: pointer;
+}
+.anomaly-marker-core {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: var(--mc, #FF4D4F);
+  box-shadow: 0 0 8px var(--mc, #FF4D4F), 0 0 20px color-mix(in srgb, var(--mc, #FF4D4F) 70%, transparent);
+}
+.anomaly-marker-ring1,
+.anomaly-marker-ring2 {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+}
+.anomaly-marker-ring1 {
+  background: color-mix(in srgb, var(--mc, #FF4D4F) 35%, transparent);
+  animation: pulseRing 2s ease-out infinite;
+}
+.anomaly-marker-ring2 {
+  background: color-mix(in srgb, var(--mc, #FF4D4F) 20%, transparent);
+  animation: pulseRingD 2s ease-out 0.7s infinite;
+}
+
+.normal-marker-wrap { position: relative; width: 8px; height: 8px; }
+.normal-marker-core {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: #00FF88;
+  box-shadow: 0 0 5px #00FF88, 0 0 12px rgba(0,255,136,0.5);
+}
+
+/* ── 스크롤바 ── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: #050B18; }
+::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.28); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,229,255,0.5); }
+
+.hud-scrollbar::-webkit-scrollbar { width: 2px; }
+.hud-scrollbar::-webkit-scrollbar-track { background: rgba(0,229,255,0.04); }
+.hud-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.22); border-radius: 2px; }
+
+/* ── Leaflet 다크 테마 ── */
+.leaflet-container { background: #050B18 !important; font-family: inherit !important; }
+.leaflet-tile { filter: saturate(0.5) brightness(0.55) hue-rotate(195deg) !important; }
+.leaflet-control-zoom a { background: rgba(8,20,37,0.9) !important; color: #00E5FF !important; border-color: rgba(0,229,255,0.3) !important; }
+.leaflet-control-attribution { background: rgba(5,11,24,0.7) !important; color: #334155 !important; font-size: 8px !important; }
+
+/* ── HUD 툴팁 (김양식장 폴리곤 hover) ── */
+.hud-tooltip {
+  background: rgba(8,15,32,0.92) !important;
+  border: 1px solid rgba(0,229,255,0.3) !important;
+  border-radius: 5px !important;
+  padding: 5px 10px !important;
+  box-shadow: 0 0 12px rgba(0,229,255,0.15) !important;
+  color: #00E5FF !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+.hud-tooltip::before { display: none !important; }
+
+/* ── 데이터 스트림 애니메이션 ── */
+@keyframes streamDown {
+  0%   { opacity: 0; transform: translateY(-8px); }
+  30%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+.stream-item { animation: streamDown 2s ease-in-out infinite; }
+
+/* ── Recharts 커스텀 ── */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: rgba(8,20,37,0.95) !important;
+  border: 1px solid rgba(0,229,255,0.25) !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line { stroke: rgba(0,229,255,0.06) !important; }

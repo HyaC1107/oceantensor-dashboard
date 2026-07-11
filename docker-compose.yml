@@ -1,0 +1,70 @@
+services:
+  postgresql:
+    image: timescale/timescaledb-ha:pg17
+    container_name: hwangbaek-db
+    environment:
+      POSTGRES_DB: oceantensor_db
+      POSTGRES_USER: oceantensor_user
+      POSTGRES_PASSWORD: "<REDACTED>"
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/home/postgres/pgdata/data
+      - ./scripts/init_extensions.sql:/docker-entrypoint-initdb.d/00_init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oceantensor_user -d oceantensor_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hwangbaek-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+      - loki
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hwangbaek-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  loki:
+    image: grafana/loki:latest
+    container_name: hwangbaek-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: hwangbaek-promtail
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+volumes:
+  pg_data:
+  grafana_data:

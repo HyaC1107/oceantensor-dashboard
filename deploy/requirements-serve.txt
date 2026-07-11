@@ -1,0 +1,19 @@
+# 웹 서빙 전용 슬림 의존성 (mock 모드 + v13 사전계산 팩 서빙)
+# ⚠️ torch/rasterio/netcdf4/xarray/copernicusmarine/matplotlib/wandb 등
+#    무거운 ML·지리 라이브러리는 서빙 경로에서 지연 import라 제외.
+#    (검증: 이 14개만으로 app.main import + v13 서빙 DB-less 동작 확인 2026-07-11)
+# 재학습/큐브빌드/XAI 히트맵 렌더는 H100 풀 pyproject 환경에서 별도 수행.
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.30.0
+pgvector>=0.3.0
+geoalchemy2>=0.15.0
+numpy>=2.1.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+apscheduler>=3.10.0
+prometheus-client>=0.21.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+google-generativeai>=0.8.0

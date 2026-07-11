@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>어텐션플리즈 — 황백화 조기경보 시스템</title>
+    <style>
+      /* Leaflet 다크테마 */
+      .leaflet-tooltip {
+        background: #0d1b2e !important;
+        border: 1px solid #1e3a5f !important;
+        color: #e2e8f0 !important;
+        border-radius: 6px !important;
+        font-size: 12px !important;
+        padding: 6px 10px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.6) !important;
+      }
+      .leaflet-tooltip::before { border-top-color: #1e3a5f !important; }
+      .leaflet-control-zoom a {
+        background: #0d1b2e !important; color: #94a3b8 !important;
+        border: 1px solid #1e3a5f !important;
+      }
+      .leaflet-control-zoom a:hover { background: #1e3a5f !important; color: #e2e8f0 !important; }
+      .leaflet-bar { border: none !important; box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important; }
+      .leaflet-container { background: #0a1628 !important; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

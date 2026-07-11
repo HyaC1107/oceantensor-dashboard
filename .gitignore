@@ -1,0 +1,55 @@
+# ── 🔴 시크릿 (절대 커밋 금지) ───────────────────────────────
+.env
+.env.*
+!.env.example
+!deploy/.env.deploy.example
+*.pem
+*.key
+keys/
+
+# ── 대용량 데이터/모델 (Git에 넣지 않음) ─────────────────────
+# 큐브·중간 산출물 — H100에서 생성, 수백 MB~수십 GB
+output/
+data/raw/
+*.npy
+*.parquet
+*.zarr/
+*.nc
+*.tif
+
+# 모델 체크포인트 — H100 /data/tta/cheolyoung/checkpoints/ 가 원본
+checkpoints/
+*.pt
+*.onnx
+
+# ── 파이썬 ────────────────────────────────────────────────────
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# ── 프론트엔드 ────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+
+# ── 로그·임시 ─────────────────────────────────────────────────
+*.log
+logs/
+.DS_Store
+Thumbs.db
+tmp/
+.claude/
+
+# ── 모니터링 런타임 데이터 ────────────────────────────────────
+monitoring/grafana/data/
+
+# GitHub Actions — gh OAuth 토큰에 workflow 스코프가 없어 푸시 불가.
+# 추가하려면: gh auth refresh -s workflow  후 별도 커밋.
+.github/workflows/

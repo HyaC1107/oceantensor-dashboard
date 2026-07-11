@@ -1,0 +1,21 @@
+# 어텐션플리즈 백엔드 — mock 서빙용 슬림 이미지 (FastAPI + v13 예측팩)
+# 빌드 컨텍스트 = 프로젝트 루트(seaweed-hwangbaek). deploy/에서 -f로 지정.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 슬림 의존성만 설치 (torch/GDAL 없음 → 이미지 작고 빌드 빠름)
+COPY deploy/requirements-serve.txt /tmp/requirements-serve.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-serve.txt
+
+# 서빙에 필요한 코드 + v13 예측팩(app/data/v13_predictions.json 포함)
+COPY app/ ./app/
+COPY ml/  ./ml/
+
+# 기본값: mock 모드(=DB 없이 v13 팩 서빙). compose에서 덮어씀.
+ENV USE_MOCK_DATA=true \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
