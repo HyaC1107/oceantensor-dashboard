@@ -144,10 +144,10 @@ export default function XaiAnalysisTab() {
           </div>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={chartData} layout="vertical" margin={{ left: 60, right: 30, top: 6, bottom: 6 }}>
+              <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 30, top: 6, bottom: 6 }}>
                 <XAxis type="number" domain={[0, 45]} tick={{ fill: '#64748b', fontSize: 11 }}
                        tickFormatter={v => `${v}%`} />
-                <YAxis type="category" dataKey="name" tick={{ fill: '#cbd5e1', fontSize: 12 }} width={60} />
+                <YAxis type="category" dataKey="name" tick={{ fill: '#cbd5e1', fontSize: 12 }} width={104} />
                 <Tooltip
                   contentStyle={{ background: 'rgba(5,11,24,0.95)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 6, fontSize: 11, fontFamily: 'Courier New,monospace' }}
                   formatter={(v, _n, p) => [`기여도 ${v}%  (측정 ${p.payload.value ?? '—'})`, '']}
