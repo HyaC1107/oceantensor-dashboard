@@ -16,26 +16,60 @@ function shortRegion(sggNm) {
   return last.replace(/(시|군|구)$/, '') || last;
 }
 
-/** 실제 어장 1194개 — {id(gid), name, region, lat, lon, centroid[lon,lat]} */
-export const ALL_FARMS = kimAllPolygons.features
-  .filter(f => f.properties?.lat && f.properties?.lon)
-  .map(f => {
-    const p = f.properties;
-    const region = shortRegion(p.sgg_nm);
-    return {
-      id:       String(p.gid),
-      gid:      p.gid,
-      name:     p.loc || p.sgg_nm || '김양식장',
-      region,
-      city:     region,                    // 기존 컴포넌트 호환(farm.city)
-      sido:     p.sido_nm,
-      species:  p.species,
-      lat:      p.lat,
-      lon:      p.lon,
-      centroid: [p.lon, p.lat],            // 기존 컴포넌트 호환([lon, lat])
-    };
-  })
-  .sort((a, b) => a.region.localeCompare(b.region, 'ko') || a.name.localeCompare(b.name, 'ko'));
+// 존 인덱스(0-based) → 코드 문자 (0→A … 25→Z, 26→AA …)
+function zoneLetter(i) {
+  let s = '', n = i + 1;
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+const _ZONE_SIZE = 9;   // 한 존당 어장 수 (A-01…A-09, B-01…)
+
+/**
+ * 실제 어장 1194개 — {id(gid), name, region, zone, lat, lon, centroid[lon,lat]}
+ *
+ * 구역 코드(zone): 데이터에 없어 결정론적으로 생성한다.
+ *   지역(시군구)별로 어장을 좌표순(북→남, 서→동) 정렬 → 9개씩 존(A,B,…)으로 묶어
+ *   존 내 순번을 붙인다. 예) 고흥 "A-01". 같은 등록부면 항상 같은 코드(안정적).
+ *   ⚠️ 등록부 어장 수가 바뀌면 순번이 재배치됨 — 등록부 갱신 시 재생성.
+ */
+export const ALL_FARMS = (() => {
+  const base = kimAllPolygons.features
+    .filter(f => f.properties?.lat && f.properties?.lon)
+    .map(f => {
+      const p = f.properties;
+      const region = shortRegion(p.sgg_nm);
+      return {
+        id:       String(p.gid),
+        gid:      p.gid,
+        name:     p.loc || p.sgg_nm || '김양식장',
+        region,
+        zone:     '',                        // 아래에서 채움
+        city:     region,                    // 기존 컴포넌트 호환(farm.city)
+        sido:     p.sido_nm,
+        species:  p.species,
+        lat:      p.lat,
+        lon:      p.lon,
+        centroid: [p.lon, p.lat],            // 기존 컴포넌트 호환([lon, lat])
+      };
+    });
+
+  // 지역별 좌표순 정렬 → 존 코드 부여
+  const byRegion = base.reduce((acc, f) => ((acc[f.region] ??= []).push(f), acc), {});
+  for (const region in byRegion) {
+    byRegion[region]
+      .slice()
+      .sort((a, b) => (b.lat - a.lat) || (a.lon - b.lon))   // 북→남, 서→동
+      .forEach((f, i) => {
+        f.zone = `${zoneLetter(Math.floor(i / _ZONE_SIZE))}-${String((i % _ZONE_SIZE) + 1).padStart(2, '0')}`;
+      });
+  }
+
+  return base.sort((a, b) =>
+    a.region.localeCompare(b.region, 'ko') ||
+    a.zone.localeCompare(b.zone) ||
+    a.name.localeCompare(b.name, 'ko'));
+})();
 
 /** 지역(시군구) → 어장 id 목록. 드롭다운 optgroup 용. */
 export const REGION_GROUPS = ALL_FARMS.reduce((acc, f) => {
@@ -61,4 +95,10 @@ export const FARM_LABEL = new Map(
 );
 export function farmLabel(f) {
   return FARM_LABEL.get(f.id) ?? f.name;
+}
+
+/** "고흥 A-01" — 지역 + 구역코드 (검색·표시 공용) */
+export function zoneLabel(f) {
+  if (!f) return '';
+  return f.zone ? `${f.region} ${f.zone}` : f.region;
 }

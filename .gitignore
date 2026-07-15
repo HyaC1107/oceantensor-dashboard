@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !deploy/.env.deploy.example
+!frontend/.env.production
 *.pem
 *.key
 keys/

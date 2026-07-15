@@ -1,8 +1,8 @@
 /**
- * FarmPicker — 실제 어장 1194개를 지역 필터 + 이름 검색으로 고르는 선택기.
+ * FarmPicker — 실제 어장 1194개를 지역 필터 + 구역/이름 검색으로 고르는 선택기.
  *
  * 어장 등록부가 1194개라 단일 <select> 로는 못 찾는다.
- *   ① 지역(시군구) 필터  ② 어장명 검색  ③ 필터된 목록에서 선택
+ *   ① 지역(시군구) 필터  ② 구역코드(A-01)·어장명 검색  ③ 필터된 목록에서 선택
  * 어장 체계는 realFarms(SSOT) — 지도·예측팩·실측 관측소가 같은 id(gid)를 공유한다.
  */
 import { useState, useMemo, useRef, useEffect } from 'react';
@@ -13,9 +13,13 @@ const REGIONS = Object.entries(REGION_GROUPS)
   .map(([name, ids]) => ({ name, n: ids.length }))
   .sort((a, b) => b.n - a.n);
 
-export default function FarmPicker({ farmId, onChange }) {
+export default function FarmPicker({ farmId, onChange, region: regionProp, onRegionChange, hideRegions }) {
   const selected = getFarm(farmId);
-  const [region, setRegion] = useState(selected?.region ?? '');
+  // 지역: controlled(맵 툴바가 관리) / uncontrolled(탭 단독) 둘 다 지원
+  const controlled = regionProp !== undefined;
+  const [regionState, setRegionState] = useState(selected?.region ?? '');
+  const region = controlled ? (regionProp ?? '') : regionState;
+  const setRegion = controlled ? (onRegionChange ?? (() => {})) : setRegionState;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
@@ -31,11 +35,12 @@ export default function FarmPicker({ farmId, onChange }) {
     const kw = q.trim().toLowerCase();
     let list = region ? ALL_FARMS.filter(f => f.region === region) : ALL_FARMS;
     if (kw) {
-      list = list.filter(f =>
-        f.name.toLowerCase().includes(kw) ||
-        f.region.toLowerCase().includes(kw) ||
-        f.id.includes(kw)
-      );
+      // 토큰 AND 매칭 — "고흥 a-01" 처럼 지역+구역 조합 검색 지원
+      const tokens = kw.split(/\s+/).filter(Boolean);
+      list = list.filter(f => {
+        const hay = `${f.region} ${f.zone} ${farmLabel(f)} ${f.id}`.toLowerCase();
+        return tokens.every(t => hay.includes(t));
+      });
     }
     return list.slice(0, 300);            // 렌더 폭주 방지
   }, [region, q]);
@@ -46,32 +51,40 @@ export default function FarmPicker({ farmId, onChange }) {
     <div ref={boxRef} style={st.wrap}>
       {/* 현재 선택 — 클릭하면 검색 패널 */}
       <button onClick={() => setOpen(o => !o)} style={st.trigger}>
-        <span style={st.triggerRegion}>{selected?.region ?? '지역'}</span>
-        <span style={st.triggerName}>{selected ? farmLabel(selected) : '어장 선택'}</span>
+        <span style={st.triggerRegion}>{selected ? (selected.zone || selected.region) : '검색'}</span>
+        <span style={st.triggerName}>
+          {selected ? `${selected.region} · ${farmLabel(selected)}` : '지역·구역·어장 검색'}
+        </span>
         <span style={st.caret}>{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
         <div style={st.panel}>
-          {/* 지역 칩 */}
-          <div style={st.chipRow}>
-            <button onClick={() => setRegion('')} style={{ ...st.chip, ...(region === '' ? st.chipOn : {}) }}>
-              전체 <span style={st.chipN}>{ALL_FARMS.length}</span>
-            </button>
-            {REGIONS.map(r => (
-              <button key={r.name} onClick={() => setRegion(r.name)}
-                      style={{ ...st.chip, ...(region === r.name ? st.chipOn : {}) }}>
-                {r.name} <span style={st.chipN}>{r.n}</span>
+          {/* 지역 칩 — 단독 사용(탭) 시만. 맵에선 상단 툴바가 지역을 관리하므로 숨김 */}
+          {!hideRegions ? (
+            <div style={st.chipRow}>
+              <button onClick={() => setRegion('')} style={{ ...st.chip, ...(region === '' ? st.chipOn : {}) }}>
+                전체 <span style={st.chipN}>{ALL_FARMS.length}</span>
               </button>
-            ))}
-          </div>
+              {REGIONS.map(r => (
+                <button key={r.name} onClick={() => setRegion(r.name)}
+                        style={{ ...st.chip, ...(region === r.name ? st.chipOn : {}) }}>
+                  {r.name} <span style={st.chipN}>{r.n}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={st.scope}>
+              📍 <b style={{ color: '#00E5FF' }}>{region || '전국'}</b> 내 어장 검색 · 지역 변경은 상단 툴바에서
+            </div>
+          )}
 
           {/* 검색 */}
           <input
             autoFocus
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="어장명 검색 (예: 남당리, 삽시도)"
+            placeholder={hideRegions ? '어장·구역 검색 (예: A-01, 삽시도)' : '지역·구역·어장 검색 (예: 고흥 A-01)'}
             style={st.search}
           />
 
@@ -91,6 +104,7 @@ export default function FarmPicker({ farmId, onChange }) {
                 style={{ ...st.item, ...(f.id === farmId ? st.itemOn : {}) }}
               >
                 <span style={st.itemRegion}>{f.region}</span>
+                <span style={st.itemZone}>{f.zone}</span>
                 <span style={st.itemName}>{farmLabel(f)}</span>
               </button>
             ))}
@@ -132,6 +146,12 @@ const st = {
   chipOn: { background: 'rgba(0,229,255,0.18)', borderColor: 'rgba(0,229,255,0.55)', color: '#00E5FF' },
   chipN: { opacity: 0.5, fontSize: 9, marginLeft: 2 },
 
+  scope: {
+    fontSize: 11, color: 'rgba(255,255,255,0.72)', margin: '2px 2px 9px', padding: '6px 9px',
+    background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.18)', borderRadius: 6,
+    fontFamily: "'Pretendard','Noto Sans KR',sans-serif",
+  },
+
   search: {
     width: '100%', boxSizing: 'border-box', padding: '8px 11px', borderRadius: 6,
     background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(0,229,255,0.25)',
@@ -149,6 +169,11 @@ const st = {
   itemOn: { background: 'rgba(0,229,255,0.12)', borderColor: 'rgba(0,229,255,0.35)' },
   itemRegion: {
     fontSize: 9.5, fontWeight: 700, color: 'rgba(0,229,255,0.75)', minWidth: 34, flexShrink: 0,
+  },
+  itemZone: {
+    fontSize: 9.5, fontWeight: 800, color: '#00E5FF', background: 'rgba(0,229,255,0.1)',
+    border: '1px solid rgba(0,229,255,0.25)', borderRadius: 4, padding: '1px 5px',
+    fontFamily: 'Courier New,monospace', flexShrink: 0, letterSpacing: 0.5,
   },
   itemName: { fontSize: 12, color: 'rgba(255,255,255,0.82)' },
   empty: { fontSize: 11.5, color: 'rgba(255,255,255,0.35)', padding: '16px 0', textAlign: 'center' },

@@ -97,6 +97,31 @@ body {
   animation: pulseRingD 2s ease-out 0.7s infinite;
 }
 
+/* ── 선택된 양식장 강조 비콘 (타겟 리티클 — 선택 중 계속 표시) ── */
+@keyframes selPulse { 0% { transform: translate(-50%,-50%) scale(.7); opacity: .85; } 100% { transform: translate(-50%,-50%) scale(2.3); opacity: 0; } }
+@keyframes selSpin  { from { transform: translate(-50%,-50%) rotate(0); } to { transform: translate(-50%,-50%) rotate(360deg); } }
+.sel-beacon { position: relative; width: 46px; height: 46px; pointer-events: none; }
+.sel-beacon > div { position: absolute; top: 50%; left: 50%; }
+.sel-beacon .p {
+  width: 46px; height: 46px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,229,255,.45) 0%, transparent 70%);
+  animation: selPulse 1.5s ease-out infinite;
+}
+.sel-beacon .retic {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1.5px dashed rgba(0,229,255,.75);
+  animation: selSpin 9s linear infinite;
+}
+.sel-beacon .ring {
+  width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+  border: 2px solid #00E5FF;
+  box-shadow: 0 0 12px rgba(0,229,255,.95), inset 0 0 7px rgba(0,229,255,.55);
+}
+.sel-beacon .dot {
+  width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 9px #00E5FF, 0 0 4px #fff;
+}
+
 .normal-marker-wrap { position: relative; width: 8px; height: 8px; }
 .normal-marker-core {
   position: absolute; inset: 0;

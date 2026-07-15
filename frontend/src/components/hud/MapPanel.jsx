@@ -6,6 +6,7 @@ import { SENSOR_OVERLAY } from '../../data/dashboardDummy';
 import kimAllPolygons from '../../data/kimFarmPolygons2025.json';
 import 'leaflet/dist/leaflet.css';
 import FarmDetailCard from './FarmDetailCard';
+import FarmPicker from '../FarmPicker';
 import { loadPredictions, resetPredictionsCache, RISK } from '../../data/v13Predictions';
 
 const NO_DATA_COLOR = 'rgba(150,165,190,0.55)';   // 예측 없음/비양식기 — 중립 회색
@@ -464,7 +465,7 @@ function farmRisk(preds, gid) {
 function regionChip(active) {
   return {
     flexShrink: 0, cursor: 'pointer', whiteSpace: 'nowrap',
-    fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+    fontSize: 10.5, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
     fontFamily: "'Pretendard','Noto Sans KR',sans-serif",
     background: active ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)',
     border: `1px solid ${active ? 'rgba(0,229,255,0.55)' : 'rgba(255,255,255,0.12)'}`,
@@ -494,6 +495,33 @@ const REGIONS = (() => {
       bounds: [[r.minLat, r.minLon], [r.maxLat, r.maxLon]],
     }))
     .sort((a, b) => b.n - a.n);
+})();
+
+// 전 지역 bounds (검색창에서 고른 소규모 지역(n<8)도 flyTo 가능하게 — 전체 지역 포함)
+//  ⚠️ 멀리 떨어진 섬 몇 개(이상치)가 min/max bounds를 부풀려 flyTo 중심이 지역과 크게 어긋난다
+//     (예: 신안은 full-bounds 중심이 실제 군집에서 84km 벗어남).
+//     → 10~90 백분위로 핵심 군집만 프레이밍 (n<10이면 전체 사용).
+const ALL_REGION_BOUNDS = (() => {
+  const g = {};
+  for (const f of kimAllPolygons.features) {
+    const p = f.properties;
+    if (!p.lat || !p.lon || !p.sgg_nm) continue;
+    const key = p.sgg_nm.split(' ').pop().replace(/(시|군|구)$/, '');
+    (g[key] ??= { lats: [], lons: [] });
+    g[key].lats.push(p.lat); g[key].lons.push(p.lon);
+  }
+  const pct = (arr, q) => {
+    const a = arr.slice().sort((x, y) => x - y);
+    const i = (a.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+    return a[lo] + (a[hi] - a[lo]) * (i - lo);
+  };
+  const out = {};
+  for (const k in g) {
+    const { lats, lons } = g[k];
+    const q = lats.length >= 10 ? 0.1 : 0;
+    out[k] = [[pct(lats, q), pct(lons, q)], [pct(lats, 1 - q), pct(lons, 1 - q)]];
+  }
+  return out;
 })();
 
 // ── 줌 기반 지역명 라벨 (줌아웃=희미하게 크게, 줌인하면 사라짐) ──
@@ -534,14 +562,15 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
   const geoJsonRef = useRef(null);
   const onMapReady = useCallback(map => { mapRef.current = map; }, []);
 
-  // 지역 선택 → 해당 구역으로 포커싱(flyToBounds)
+  // 지역 선택(단일 소스) — 툴바 칩 · 검색창 지역칩이 공유.
+  // 어느 쪽에서 눌러도 하이라이트(activeRegion) + flyTo가 함께 동기화된다.
   const [activeRegion, setActiveRegion] = useState(null);
-  const focusRegion = useCallback((r) => {
+  const selectRegion = useCallback((name) => {
     const map = mapRef.current;
-    if (!map) return;
-    if (!r) { map.flyTo([34.6, 126.5], 9, { duration: 0.8 }); setActiveRegion(null); return; }
-    map.flyToBounds(r.bounds, { padding: [70, 70], maxZoom: 12, duration: 0.9 });
-    setActiveRegion(r.name);
+    if (!name) { setActiveRegion(null); if (map) map.flyTo([34.6, 126.5], 9, { duration: 0.8 }); return; }
+    setActiveRegion(name);
+    const bounds = ALL_REGION_BOUNDS[name];
+    if (map && bounds) map.flyToBounds(bounds, { padding: [70, 70], maxZoom: 12, duration: 0.9 });
   }, []);
 
   // v13 실예측 로드 — 지도 색상의 진짜 소스.
@@ -590,6 +619,19 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
     [farms]
   );
 
+  // 검색 피커에서 어장 선택 → 폴리곤 클릭과 동일하게 선택(→ MapController flyTo)
+  const handlePick = useCallback((gid) => {
+    const farm = farmMap[String(gid)];
+    if (farm) onSiteSelect(farm);
+  }, [farmMap, onSiteSelect]);
+
+  // 선택된 양식장 강조 비콘(타겟 리티클) — 선택 중 계속 표시돼 어디 골랐는지 한눈에
+  const selIcon = useMemo(() => L.divIcon({
+    className: '',
+    html: '<div class="sel-beacon"><div class="p"></div><div class="retic"></div><div class="ring"></div><div class="dot"></div></div>',
+    iconSize: [46, 46], iconAnchor: [23, 23],
+  }), []);
+
   // 펄스 마커 = '급등 경보'(onset)만. AI가 새로 잡아낸 위험만 눈에 띄게 한다.
   const anomalyFarms = useMemo(() => farms.filter(f => f.risk === 'onset'), [farms]);
   const riskCount = useMemo(() => {
@@ -612,7 +654,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
       const col        = scoreColor(score, risk);
 
       if (isSelected) {
-        sub.setStyle({ color: col, weight: 3.5, fillColor: col, fillOpacity: 0.32, dashArray: null });
+        sub.setStyle({ color: '#00E5FF', weight: 4, fillColor: col, fillOpacity: 0.5, dashArray: null });
       } else if (dimmed) {
         sub.setStyle({ color: 'rgba(0,200,255,0.08)', weight: 0.5, fillColor: 'rgba(0,180,255,1)', fillOpacity: 0.02, dashArray: null });
       } else {
@@ -691,6 +733,16 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
             />
           );
         })}
+
+        {/* 선택된 양식장 강조 비콘 — 위치에 항상 떠 있어 눈에 띔 */}
+        {selectedSite && (
+          <Marker
+            position={[selectedSite.lat, selectedSite.lon]}
+            icon={selIcon}
+            interactive={false}
+            zIndexOffset={2000}
+          />
+        )}
       </MapContainer>
 
       {/* 예측 기준일 · 시즌 상태 배너 */}
@@ -747,24 +799,37 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         </div>
       )}
 
-      {/* 상단 지역 선택 바 — 클릭 시 해당 구역 포커싱 */}
+      {/* 상단: 어장·구역 검색(왼) + 지역 포커싱 툴바(오) — 역할 분리, 지역칩은 툴바에만 */}
       <div style={{
         position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
-        zIndex: 640, display: 'flex', gap: 5, alignItems: 'center',
-        maxWidth: '90%', overflowX: 'auto', padding: '6px 8px',
-        background: 'rgba(5,11,24,0.85)', border: '1px solid rgba(0,229,255,0.2)',
-        borderRadius: 9, backdropFilter: 'blur(10px)',
+        zIndex: 640, display: 'flex', gap: 8, alignItems: 'flex-start', maxWidth: '94%',
       }}>
-        <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0, paddingLeft: 2 }}>
-          지역
-        </span>
-        <button onClick={() => focusRegion(null)} style={regionChip(activeRegion === null)}>전체</button>
-        {REGIONS.map(r => (
-          <button key={r.name} onClick={() => focusRegion(r)} style={regionChip(activeRegion === r.name)}>
-            {r.name}
-            <span style={{ opacity: 0.5, marginLeft: 4, fontSize: 9 }}>{r.n}</span>
-          </button>
-        ))}
+        {/* 어장·구역 검색 (지역은 툴바가 관리 → hideRegions, 툴바 선택 지역으로 필터) */}
+        <FarmPicker
+          farmId={selectedSite?.id}
+          onChange={handlePick}
+          region={activeRegion || ''}
+          hideRegions
+        />
+
+        {/* 지역 툴바 — 폭 제한 + 양옆 스크롤. 클릭 시 하이라이트 + flyTo + 검색창 필터 동기화 */}
+        <div style={{
+          display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', padding: '6px 8px',
+          maxWidth: 'min(46vw, 440px)', minWidth: 0, scrollbarWidth: 'thin',
+          background: 'rgba(5,11,24,0.85)', border: '1px solid rgba(0,229,255,0.2)',
+          borderRadius: 9, backdropFilter: 'blur(10px)',
+        }}>
+          <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0, paddingLeft: 2 }}>
+            지역
+          </span>
+          <button onClick={() => selectRegion('')} style={regionChip(activeRegion === null)}>전체</button>
+          {REGIONS.map(r => (
+            <button key={r.name} onClick={() => selectRegion(r.name)} style={regionChip(activeRegion === r.name)}>
+              {r.name}
+              <span style={{ opacity: 0.5, marginLeft: 4, fontSize: 9 }}>{r.n}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 파티클 레이어 */}
@@ -782,9 +847,9 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
       {/* 맵 위 플로팅 팜 카드 */}
       <FloatingFarmCard selectedSite={selectedSite} mapRef={mapRef} onClose={onClearSite} onGoXai={onGoXai} />
 
-      {/* 센서 오버레이 */}
+      {/* 센서 오버레이 — 상단 검색/툴바 아래로 내려 겹치지 않게 */}
       <div style={{
-        position: 'absolute', left: 12, top: 12, zIndex: 600, pointerEvents: 'none',
+        position: 'absolute', left: 12, top: 62, zIndex: 600, pointerEvents: 'none',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
         <div style={{
