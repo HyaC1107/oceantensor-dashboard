@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { motion, AnimatePresence, useDragControls } from 'framer-motion';
-import { SENSOR_OVERLAY } from '../../data/dashboardDummy';
 import kimAllPolygons from '../../data/kimFarmPolygons2025.json';
+import { fetchRealSensorByLatLon, provenanceLabel } from '../../data/realSensor';
 import 'leaflet/dist/leaflet.css';
 import FarmDetailCard from './FarmDetailCard';
 import FarmPicker from '../FarmPicker';
@@ -564,6 +564,55 @@ function RegionLabels() {
   ));
 }
 
+// ── 실측 센서 오버레이(좌상단) — 선택 어장(없으면 완도 대표) 최근접 관측소 실측값 ──
+// 풍속/조류는 실측 엔드포인트에 없어, 실측 가능한 수온·염분·DIN·강수로 구성 + provenance 노출.
+function RealSensorOverlay({ site }) {
+  const lat = site?.lat ?? 34.31;
+  const lon = site?.lon ?? 126.76;
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let alive = true; setD(null);
+    fetchRealSensorByLatLon(lat, lon).then(r => { if (alive) setD(r); });
+    return () => { alive = false; };
+  }, [lat, lon]);
+
+  const sv = d?.sensor_vals ?? {};
+  const fmt = (v) => (Number.isFinite(v) ? (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)) : '—');
+  const fields = [
+    { label: '수온', val: sv.water_temp,    unit: '℃',    col: '#FF8A3D' },
+    { label: '염분', val: sv.salinity,      unit: 'PSU',  col: '#8B5CF6' },
+    { label: 'DIN',  val: d?.raw_ugl?.din,  unit: 'μg/L', col: '#00E5FF' },
+    { label: '강수', val: sv.precipitation, unit: 'mm',   col: '#00E5FF' },
+  ];
+
+  return (
+    <div style={{
+      background: 'rgba(5,11,24,0.85)', border: '1px solid rgba(0,229,255,0.22)',
+      borderRadius: 6, padding: '10px 16px', backdropFilter: 'blur(12px)',
+    }}>
+      <div style={{ fontSize: 11, color: 'rgba(0,229,255,0.5)', letterSpacing: 1.5, marginBottom: 6, fontWeight: 700 }}>
+        실측 센서 · {site?.name ?? '완도 대표'}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
+        {fields.map(({ label, val, unit, col }) => (
+          <div key={label}>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: 500 }}>{label}</div>
+            <div style={{ fontSize: 13, fontFamily: 'Courier New', fontWeight: 700, color: col }}>
+              {fmt(val)} <span style={{ fontSize: 10, opacity: 0.55 }}>{unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{
+        fontSize: 8.5, marginTop: 7, fontFamily: 'Courier New', letterSpacing: 0.3, lineHeight: 1.4,
+        color: d ? 'rgba(0,255,136,0.7)' : 'rgba(255,211,0,0.65)',
+      }}>
+        {d ? `● 실측 · ${provenanceLabel(d.provenance)}` : '● 실측 미연결 (최근접 관측소 없음)'}
+      </div>
+    </div>
+  );
+}
+
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onClearSite, onGoXai }) {
   const mapRef     = useRef(null);
@@ -872,27 +921,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         position: 'absolute', left: 12, top: 62, zIndex: 600, pointerEvents: 'none',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        <div style={{
-          background: 'rgba(5,11,24,0.85)', border: '1px solid rgba(0,229,255,0.22)',
-          borderRadius: 6, padding: '10px 16px', backdropFilter: 'blur(12px)',
-        }}>
-          <div style={{ fontSize: 11, color: 'rgba(0,229,255,0.5)', letterSpacing: 2, marginBottom: 6, fontWeight: 700 }}>
-            SENSOR OVERLAY
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
-            {[
-              { label: '풍속', val: `${SENSOR_OVERLAY.windSpeed} m/s`, col: '#00E5FF' },
-              { label: '풍향', val: SENSOR_OVERLAY.windDir,             col: '#00E5FF' },
-              { label: '수온', val: `${SENSOR_OVERLAY.seaTemp} ℃`,     col: '#FF8A3D' },
-              { label: '조류', val: `${SENSOR_OVERLAY.currentSpeed} kt`, col: '#8B5CF6' },
-            ].map(({ label, val, col }) => (
-              <div key={label}>
-                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: 500 }}>{label}</div>
-                <div style={{ fontSize: 13, fontFamily: 'Courier New', fontWeight: 700, color: col }}>{val}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <RealSensorOverlay site={selectedSite} />
 
         {/* 위험 등급 범례 — onset(전이) 기반 */}
         <div style={{
