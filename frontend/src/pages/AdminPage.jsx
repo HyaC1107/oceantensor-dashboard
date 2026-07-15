@@ -100,7 +100,7 @@ function ApiCard({ item }) {
 
 const s = {
   page: {
-    minHeight: '100vh', background: '#0a1628', color: '#e2e8f0',
+    height: '100vh', overflowY: 'auto', background: '#0a1628', color: '#e2e8f0',
     fontFamily: "'Pretendard', 'Noto Sans KR', system-ui, sans-serif",
     padding: '32px 24px',
   },

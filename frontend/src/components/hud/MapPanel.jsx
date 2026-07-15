@@ -474,6 +474,14 @@ function regionChip(active) {
   };
 }
 
+// 지역 툴바 좌우 이동 화살표 버튼 스타일
+const arrowBtnStyle = {
+  flexShrink: 0, cursor: 'pointer', width: 22, height: 24, borderRadius: 5, padding: 0,
+  display: 'grid', placeItems: 'center', fontSize: 15, fontWeight: 800, lineHeight: 1,
+  color: '#00E5FF', background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.25)',
+  fontFamily: 'monospace',
+};
+
 // ── 시군구 지역 그룹 (라벨 + 포커싱용) — 정적 1회 계산 ──────────
 const REGIONS = (() => {
   const g = {};
@@ -631,6 +639,12 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
     html: '<div class="sel-beacon"><div class="p"></div><div class="retic"></div><div class="ring"></div><div class="dot"></div></div>',
     iconSize: [46, 46], iconAnchor: [23, 23],
   }), []);
+
+  // 지역 툴바 좌우 화살표 스크롤 (스크롤바 대신)
+  const chipScrollRef = useRef(null);
+  const scrollChips = useCallback((dir) => {
+    chipScrollRef.current?.scrollBy({ left: dir * 160, behavior: 'smooth' });
+  }, []);
 
   // 펄스 마커 = '급등 경보'(onset)만. AI가 새로 잡아낸 위험만 눈에 띄게 한다.
   const anomalyFarms = useMemo(() => farms.filter(f => f.risk === 'onset'), [farms]);
@@ -812,23 +826,29 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
           hideRegions
         />
 
-        {/* 지역 툴바 — 폭 제한 + 양옆 스크롤. 클릭 시 하이라이트 + flyTo + 검색창 필터 동기화 */}
+        {/* 지역 툴바 — 스크롤바 대신 좌우 화살표로 이동. 클릭 시 하이라이트 + flyTo + 검색창 필터 동기화 */}
         <div style={{
-          display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', padding: '6px 8px',
-          maxWidth: 'min(46vw, 440px)', minWidth: 0, scrollbarWidth: 'thin',
+          display: 'flex', gap: 4, alignItems: 'center', padding: '6px 8px',
           background: 'rgba(5,11,24,0.85)', border: '1px solid rgba(0,229,255,0.2)',
           borderRadius: 9, backdropFilter: 'blur(10px)',
         }}>
           <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0, paddingLeft: 2 }}>
             지역
           </span>
-          <button onClick={() => selectRegion('')} style={regionChip(activeRegion === null)}>전체</button>
-          {REGIONS.map(r => (
-            <button key={r.name} onClick={() => selectRegion(r.name)} style={regionChip(activeRegion === r.name)}>
-              {r.name}
-              <span style={{ opacity: 0.5, marginLeft: 4, fontSize: 9 }}>{r.n}</span>
-            </button>
-          ))}
+          <button onClick={() => scrollChips(-1)} aria-label="지역 왼쪽 이동" style={arrowBtnStyle}>‹</button>
+          <div ref={chipScrollRef} style={{
+            display: 'flex', gap: 5, alignItems: 'center', overflow: 'hidden',
+            maxWidth: 'min(38vw, 330px)', scrollBehavior: 'smooth',
+          }}>
+            <button onClick={() => selectRegion('')} style={regionChip(activeRegion === null)}>전체</button>
+            {REGIONS.map(r => (
+              <button key={r.name} onClick={() => selectRegion(r.name)} style={regionChip(activeRegion === r.name)}>
+                {r.name}
+                <span style={{ opacity: 0.5, marginLeft: 4, fontSize: 9 }}>{r.n}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => scrollChips(1)} aria-label="지역 오른쪽 이동" style={arrowBtnStyle}>›</button>
         </div>
       </div>
 
