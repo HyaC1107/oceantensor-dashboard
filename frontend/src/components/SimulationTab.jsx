@@ -53,7 +53,7 @@ function severity(wbi) {
 
 // ── 슬라이더 정의 ────────────────────────────────────────────────────────
 const FACTORS = [
-  { key: 'water_temp',       label: '수온',        unit: '℃',      min: 5,   max: 32,  step: 0.1,  hint: '20℃ 초과부터 위험 가중 (가중치 27%)' },
+  { key: 'water_temp',       label: '수온',        unit: '℃',      min: 5,   max: 35,  step: 0.1,  hint: '20℃ 초과부터 위험 가중 (가중치 27%) · 실측 현장 최고 31.6℃' },
   { key: 'din',              label: 'DIN 용존무기질소', unit: 'μmol/L', min: 0,   max: 15,  step: 0.1,  hint: '5 μmol/L 이하 → 급격 상승 (가중치 38%, 최대)' },
   { key: 'dip',              label: 'DIP 용존무기인',  unit: 'μmol/L', min: 0.1, max: 1.5, step: 0.01, hint: 'N:P 비율(DIN÷DIP) 결정 — N:P<10 심각 신호 (19%)' },
   { key: 'salinity',         label: '염분',        unit: 'psu',    min: 26,  max: 35,  step: 0.1,  hint: '32 psu 미만부터 위험 (강수/담수 유입 시 하락, 6%)' },

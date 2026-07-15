@@ -81,6 +81,30 @@ export async function loadPredictions(date) {
 /** 캐시 무효화 (날짜 전환 시) */
 export function resetPredictionsCache() { _cache = null; }
 
+/**
+ * 예측팩 범위(meta.date_range) 내 **김 양식기(11~5월)** 월 목록 — 연도+월 타임라인용.
+ * 비수기(6~10월)는 제외. 각 월의 대표일(15일)을 date 로 준다.
+ * @returns {Promise<Array<{key,year,month,label,date}>>}
+ */
+export async function fetchSeasonMonths() {
+  try {
+    const meta = await fetchMeta();
+    const [s, e] = meta.date_range || [];
+    if (!s || !e) return [];
+    const months = [];
+    let y = Number(s.slice(0, 4)), m = Number(s.slice(5, 7));
+    const ey = Number(e.slice(0, 4)), em = Number(e.slice(5, 7));
+    while (y < ey || (y === ey && m <= em)) {
+      if ([11, 12, 1, 2, 3, 4, 5].includes(m)) {
+        const key = `${y}-${String(m).padStart(2, '0')}`;
+        months.push({ key, year: y, month: m, label: `${y}.${String(m).padStart(2, '0')}`, date: `${key}-15` });
+      }
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return months;
+  } catch { return []; }
+}
+
 /** 김 양식(수확) 시즌 여부 — SSOT: channel_builder._is_harvest_season (11~5월) */
 export function isHarvestSeason(date) {
   const m = Number(String(date).slice(5, 7));

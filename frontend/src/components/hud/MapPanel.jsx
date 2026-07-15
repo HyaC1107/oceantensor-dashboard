@@ -7,7 +7,7 @@ import { fetchRealSensorByLatLon, provenanceLabel } from '../../data/realSensor'
 import 'leaflet/dist/leaflet.css';
 import FarmDetailCard from './FarmDetailCard';
 import FarmPicker from '../FarmPicker';
-import { loadPredictions, resetPredictionsCache, RISK } from '../../data/v13Predictions';
+import { loadPredictions, resetPredictionsCache, RISK, fetchSeasonMonths } from '../../data/v13Predictions';
 
 const NO_DATA_COLOR = 'rgba(150,165,190,0.55)';   // 예측 없음/비양식기 — 중립 회색
 
@@ -648,6 +648,23 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
     return () => { alive = false; };
   }, [viewDate]);
 
+  // ── 연도+월 타임라인 (양식기 11~5월만) + 자동재생 ──
+  const [seasonMonths, setSeasonMonths] = useState([]);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => { fetchSeasonMonths().then(setSeasonMonths).catch(() => {}); }, []);
+  const curMonthKey = viewDate ? viewDate.slice(0, 7) : null;
+  useEffect(() => {
+    if (!playing || seasonMonths.length === 0) return;
+    const id = setInterval(() => {
+      setViewDate(prev => {
+        const ym = prev ? prev.slice(0, 7) : null;
+        const i = seasonMonths.findIndex(m => m.key === ym);
+        return seasonMonths[(i + 1) % seasonMonths.length].date;
+      });
+    }, 1500);
+    return () => clearInterval(id);
+  }, [playing, seasonMonths]);
+
   // 1194개 전체 어장 → farm 객체 배열 (score = v13 실예측, 없으면 null)
   const farms = useMemo(() => kimAllPolygons.features
     .filter(f => f.properties.lat && f.properties.lon)
@@ -901,6 +918,39 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
           <button onClick={() => scrollChips(1)} aria-label="지역 오른쪽 이동" style={arrowBtnStyle}>›</button>
         </div>
       </div>
+
+      {/* 하단 연도+월 타임라인 (양식기 11~5월) + ▶ 자동재생 — 황백화 확산 애니메이션 */}
+      {seasonMonths.length > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 641,
+          display: 'flex', alignItems: 'center', gap: 8, maxWidth: '92%',
+          background: 'rgba(5,11,24,0.9)', border: '1px solid rgba(0,229,255,0.28)',
+          borderRadius: 10, padding: '8px 12px', backdropFilter: 'blur(12px)',
+        }}>
+          <button onClick={() => setPlaying(p => !p)} title="양식기 자동재생" style={{
+            flexShrink: 0, width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: 12,
+            color: '#050B18', background: '#00E5FF', border: 'none', fontWeight: 900, lineHeight: 1,
+          }}>{playing ? '⏸' : '▶'}</button>
+          <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0 }}>양식기</span>
+          <div style={{ display: 'flex', gap: 3, overflowX: 'auto', maxWidth: '60vw', scrollbarWidth: 'thin' }}>
+            {seasonMonths.map(m => {
+              const on = m.key === curMonthKey;
+              return (
+                <button key={m.key} onClick={() => { setPlaying(false); setViewDate(m.date); }}
+                  style={{
+                    flexShrink: 0, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, padding: '4px 7px', borderRadius: 5,
+                    fontFamily: 'Courier New,monospace', whiteSpace: 'nowrap',
+                    background: on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${on ? 'rgba(0,229,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                    color: on ? '#00E5FF' : 'rgba(255,255,255,0.6)',
+                  }}>
+                  {String(m.year).slice(2)}.{String(m.month).padStart(2, '0')}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 파티클 레이어 */}
       <ParticleCanvas />
