@@ -87,11 +87,17 @@ WITH st AS (
 )
 SELECT st.stn_nm AS station, st.km,
        max(a.tm) AS observed_at,
-       COALESCE(sum(a.rn), 0) AS precipitation_24h
+       COALESCE(sum(a.rn), 0) AS precipitation_24h,
+       (SELECT ws FROM kma_asos_hourly w
+         WHERE w.stn_id = st.stn_id AND w.ws IS NOT NULL
+         ORDER BY w.tm DESC LIMIT 1) AS wind_speed,
+       (SELECT wd FROM kma_asos_hourly w
+         WHERE w.stn_id = st.stn_id AND w.wd IS NOT NULL
+         ORDER BY w.tm DESC LIMIT 1) AS wind_dir
 FROM st
 JOIN kma_asos_hourly a ON a.stn_id = st.stn_id
 WHERE a.tm >= (SELECT max(tm) FROM kma_asos_hourly) - INTERVAL '24 hours'
-GROUP BY st.stn_nm, st.km
+GROUP BY st.stn_nm, st.km, st.stn_id
 """)
 
 
@@ -112,16 +118,20 @@ async def _fetch_real(db: AsyncSession, lat: float, lon: float) -> Optional[dict
     dip = round(dip_ugl / P_ATOMIC, 3) if dip_ugl is not None else None
     np_ratio = round(din / dip, 2) if (din is not None and dip) else None
 
-    # 강수는 별도 소스(KMA) — 없으면 0
+    # 강수·풍속은 별도 소스(KMA) — 없으면 0/None
     precip, kma_station, kma_at = 0.0, None, None
+    wind_speed, wind_dir = None, None
     try:
         kma = (await db.execute(_KMA_SQL, {"lat": lat, "lon": lon})).mappings().first()
         if kma:
             precip = round(_f(kma["precipitation_24h"]) or 0.0, 1)
             kma_station = kma["station"]
             kma_at = kma["observed_at"]
+            ws_v = _f(kma["wind_speed"]); wd_v = _f(kma["wind_dir"])
+            wind_speed = round(ws_v, 1) if ws_v is not None else None
+            wind_dir = round(wd_v) if wd_v is not None else None
     except Exception:
-        pass  # 강수 실패는 치명적이지 않음 — 나머지 값은 그대로 서빙
+        pass  # KMA 실패는 치명적이지 않음 — 나머지 값은 그대로 서빙
 
     sensor_vals = {
         "water_temp":       _f(koem["water_temp"]),
@@ -133,6 +143,8 @@ async def _fetch_real(db: AsyncSession, lat: float, lon: float) -> Optional[dict
         "chlorophyll_a":    _f(koem["chlorophyll_a"]),   # μg/L ≈ mg/m³
         "turbidity":        _f(koem["suspended_solids"]),  # 부유물질(SS) 대용
         "precipitation":    precip,
+        "wind_speed":       wind_speed,   # m/s (KMA, 최신)
+        "wind_dir":         wind_dir,     # deg
     }
     return {
         "sensor_vals": sensor_vals,

@@ -243,7 +243,7 @@ const st = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
     background: 'rgba(8,20,37,0.72)', backdropFilter: 'blur(12px)',
     border: '1px solid rgba(0,229,255,0.14)', borderRadius: 8, padding: '12px 18px',
-    position: 'relative', overflow: 'hidden',
+    position: 'relative',   // overflow:hidden 제거 — FarmPicker 드롭다운이 잘리던 원인
   },
   headLeft: { display: 'flex', alignItems: 'center', gap: 12 },
   headTitle: {

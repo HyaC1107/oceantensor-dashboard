@@ -580,6 +580,7 @@ function RealSensorOverlay({ site }) {
   const fmt = (v) => (Number.isFinite(v) ? (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)) : '—');
   const fields = [
     { label: '수온', val: sv.water_temp,    unit: '℃',    col: '#FF8A3D' },
+    { label: '풍속', val: sv.wind_speed,    unit: 'm/s',  col: '#00E5FF' },
     { label: '염분', val: sv.salinity,      unit: 'PSU',  col: '#8B5CF6' },
     { label: 'DIN',  val: d?.raw_ugl?.din,  unit: 'μg/L', col: '#00E5FF' },
     { label: '강수', val: sv.precipitation, unit: 'mm',   col: '#00E5FF' },
