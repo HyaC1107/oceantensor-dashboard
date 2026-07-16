@@ -81,6 +81,29 @@ export async function loadPredictions(date) {
 /** 캐시 무효화 (날짜 전환 시) */
 export function resetPredictionsCache() { _cache = null; }
 
+/** 시퀀스 코드(문자) → risk 등급. 백엔드 /predict/v7-sequence 와 계약. */
+export const SEQ_CODE_RISK = { '3': 'onset', '2': 'sustained', '1': 'watch', '0': 'normal', '.': null };
+
+let _seqCache = null;
+/**
+ * 양식기(11~5월) **일단위 위험등급 시퀀스** — 타임랩스 자동재생용.
+ * fetch 1회로 시즌 전체를 받아 캐시한다(≈0.5MB). 재생 중엔 이 캐시에서 프레임을 읽어
+ * 네트워크 없이 폴리곤 색만 갈아끼운다.
+ * @returns {Promise<{dates:string[], codes:Object<string,string>}|null>}
+ *   codes[gid] = 날짜순 등급 문자열 (각 문자 = SEQ_CODE_RISK 키).
+ */
+export async function fetchSequence() {
+  if (_seqCache) return _seqCache;
+  try {
+    const r = await fetch(`${API_BASE}/predict/v7-sequence`);
+    if (!r.ok) throw new Error(`v7-sequence ${r.status}`);
+    const j = await r.json();
+    if (!Array.isArray(j.dates) || !j.codes) return null;
+    _seqCache = { dates: j.dates, codes: j.codes };
+    return _seqCache;
+  } catch { return null; }
+}
+
 /**
  * 예측팩 범위(meta.date_range) 내 **김 양식기(11~5월)** 월 목록 — 연도+월 타임라인용.
  * 비수기(6~10월)는 제외. 각 월의 대표일(15일)을 date 로 준다.
@@ -116,7 +139,7 @@ export function stageToScore(stage) {
   return { 0: 0.15, 1: 0.45, 2: 0.7, 3: 0.9 }[stage] ?? null;
 }
 
-export const STAGE_LABEL = { 0: '정상', 1: '초기', 2: '경계', 3: '진행' };
+export const STAGE_LABEL = { 0: '정상', 1: '초기', 2: '경계', 3: '심각' };
 
 /**
  * ★ 지도 색상 SSOT — onset(전이) 기반 위험 등급.

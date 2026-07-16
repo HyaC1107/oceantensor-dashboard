@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  font-family: 'Pretendard', 'Noto Sans KR', 'Courier New', monospace, system-ui, sans-serif;
+  font-family: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', 'Courier New', monospace, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -142,6 +142,8 @@ body {
 
 /* ── Leaflet 다크 테마 ── */
 .leaflet-container { background: #050B18 !important; font-family: inherit !important; }
+/* 폴리곤 색 전환을 부드럽게 — 타임랩스 자동재생 시 위험등급이 크로스페이드된다. */
+.leaflet-interactive { transition: fill 0.35s linear, fill-opacity 0.35s linear, stroke 0.35s linear; }
 .leaflet-tile { filter: saturate(0.5) brightness(0.55) hue-rotate(195deg) !important; }
 .leaflet-control-zoom a { background: rgba(8,20,37,0.9) !important; color: #00E5FF !important; border-color: rgba(0,229,255,0.3) !important; }
 .leaflet-control-attribution { background: rgba(5,11,24,0.7) !important; color: #334155 !important; font-size: 8px !important; }

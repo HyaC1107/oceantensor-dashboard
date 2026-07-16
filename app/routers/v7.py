@@ -22,7 +22,7 @@ DATA_DIR = Path(__file__).parents[1] / "data"
 PACK_ALL = DATA_DIR / "v13_predictions_all.json"   # gid  키
 PACK_79  = DATA_DIR / "v13_predictions.json"       # Fxx  키
 PACK_V7  = DATA_DIR / "v7_predictions.json"        # 구 폴백
-STAGE_LABELS = {0: "정상", 1: "초기", 2: "경계", 3: "진행"}
+STAGE_LABELS = {0: "정상", 1: "초기", 2: "경계", 3: "심각"}
 
 # ── 김 양식(수확) 시즌 — SSOT: ml/data/channel_builder.py `_is_harvest_season`
 #    "수확기 여부. 11~5월=True, 6~10월=False(IGNORE)."
@@ -201,6 +201,63 @@ def get_season_info():
         "in_season_dates": in_season_dates,
         "n_in_season_dates": len(in_season_dates),
     }
+
+
+@lru_cache(maxsize=1)
+def _build_sequence() -> Optional[dict]:
+    """양식기(11~5월) 일단위 어장별 위험등급 시퀀스 (무거운 전량 계산 — 팩당 1회 캐시).
+
+    지도 색상 SSOT(`_risk_class`, onset 기반)를 그대로 재사용해 **전 어장 × 양식기 전 날짜**의
+    risk 등급만 뽑아 열지향 문자열로 압축한다. `_load`(lru_cache)와 함께 캐시되므로
+    팩 교체 후 백엔드 재시작 시 함께 무효화된다.
+    """
+    _, data = _load()
+    if not data:
+        return None
+    preds = data.get("predictions", {})
+    dates = sorted(d for d in preds if _in_season(d))
+    if not dates:
+        return None
+
+    CODE = {"onset": "3", "sustained": "2", "watch": "1", "normal": "0"}
+    gids = sorted({g for d in dates for g in preds[d].keys()})
+    codes: dict[str, list[str]] = {g: [] for g in gids}
+
+    for d in dates:
+        frame = preds[d]
+        pdate = _prev_date(preds, d)
+        prev_frame = preds.get(pdate, {}) if pdate else {}
+        for g in gids:
+            raw = frame.get(g)
+            if not isinstance(raw, dict):
+                codes[g].append(".")          # 그날 그 어장 예측 없음
+                continue
+            warn = float(raw.get("warn", 0.0))
+            praw = prev_frame.get(g)
+            onset = (round(warn - float(praw["warn"]), 4)
+                     if isinstance(praw, dict) and "warn" in praw else None)
+            codes[g].append(CODE[_risk_class(warn, onset)])
+
+    return {
+        "dates": dates,
+        "codes": {g: "".join(v) for g, v in codes.items()},
+        "code_legend": {"3": "onset", "2": "sustained", "1": "watch", "0": "normal", ".": "none"},
+        "out_of_grid_farms": data["meta"].get("out_of_grid_farms", []),
+    }
+
+
+@router.get("/v7-sequence")
+def get_v7_sequence():
+    """양식기 일단위 위험등급 시퀀스 — 프론트 타임랩스 자동재생용(fetch 1회로 시즌 통째).
+
+    codes[gid] = 날짜순 등급 문자열. 문자: 3=onset / 2=sustained / 1=watch / 0=normal / .=예측없음.
+    색 판정은 `/predict/v7`와 동일한 `_risk_class`(onset 기반)를 쓴다.
+    """
+    model_name, _ = _load()
+    seq = _build_sequence()
+    if seq is None:
+        raise HTTPException(503, "양식기 예측 데이터 없음")
+    return {"model": model_name, **seq}
 
 
 @router.get("/v7/{farm_id}")

@@ -80,7 +80,7 @@ function Sparkline({ color, trend = 'up' }) {
 }
 
 const V7_COLORS = { 0: '#00FF88', 1: '#FFD700', 2: '#FF8A3D', 3: '#FF4D4F' };
-const V7_LABELS = { 0: '정상', 1: '초기', 2: '경계', 3: '진행' };
+const V7_LABELS = { 0: '정상', 1: '초기', 2: '경계', 3: '심각' };
 
 function SectionLabel({ children }) {
   return (

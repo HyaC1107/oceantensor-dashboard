@@ -7,7 +7,7 @@ import { fetchRealSensorByLatLon, provenanceLabel } from '../../data/realSensor'
 import 'leaflet/dist/leaflet.css';
 import FarmDetailCard from './FarmDetailCard';
 import FarmPicker from '../FarmPicker';
-import { loadPredictions, resetPredictionsCache, RISK, fetchSeasonMonths } from '../../data/v13Predictions';
+import { loadPredictions, resetPredictionsCache, RISK, fetchSeasonMonths, fetchSequence, SEQ_CODE_RISK } from '../../data/v13Predictions';
 
 const NO_DATA_COLOR = 'rgba(150,165,190,0.55)';   // 예측 없음/비양식기 — 중립 회색
 
@@ -39,6 +39,13 @@ function scoreColor(score, risk) {
 function scoreSev(score, risk) {
   if (risk && RISK[risk]) return RISK[risk].label;
   return score == null ? 'NO DATA' : '정상';
+}
+
+// 양식기 시즌 키 — 11~12월은 그해 시작, 1~5월은 전해 시작 (한 주기 = 11월~다음5월).
+function seasonOf(date) {
+  const y = Number(date.slice(0, 4)), m = Number(date.slice(5, 7));
+  const s = (m >= 11) ? y : y - 1;
+  return `${s}-${s + 1}`;
 }
 
 // ── 파티클 캔버스 ─────────────────────────────────────────────
@@ -648,22 +655,95 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
     return () => { alive = false; };
   }, [viewDate]);
 
-  // ── 연도+월 타임라인 (양식기 11~5월만) + 자동재생 ──
-  const [seasonMonths, setSeasonMonths] = useState([]);
-  const [playing, setPlaying] = useState(false);
+  // ── 연도+월 타임라인 (양식기 11~5월) + 일단위 타임랩스 자동재생 ──
+  const [seasonMonths, setSeasonMonths]   = useState([]);
+  const [playing, setPlaying]             = useState(false);
+  const [sequence, setSequence]           = useState(null);   // {dates, codes} — 일단위 위험등급 시퀀스
+  const [seqLoading, setSeqLoading]       = useState(false);
+  const [playPos, setPlayPos]             = useState(0);       // frameIndices 내 위치(시즌 필터 기준)
+  const [selectedSeason, setSelectedSeason] = useState(null);  // null=전체 시즌, 'YYYY-YYYY'=한 시즌
+  const [speed, setSpeed]                 = useState(1);        // 재생 배속 1/2/4
   useEffect(() => { fetchSeasonMonths().then(setSeasonMonths).catch(() => {}); }, []);
-  const curMonthKey = viewDate ? viewDate.slice(0, 7) : null;
+
+  // 시퀀스 안의 시즌 목록 (예: ['2024-2025','2025-2026'])
+  const seasons = useMemo(() => {
+    if (!sequence) return [];
+    return [...new Set(sequence.dates.map(seasonOf))].sort();
+  }, [sequence]);
+
+  // 재생 대상 원본 인덱스 배열 — 선택 시즌으로 좁힌다. playPos는 이 배열의 위치.
+  const frameIndices = useMemo(() => {
+    if (!sequence) return [];
+    const all = sequence.dates.map((_, i) => i);
+    return selectedSeason ? all.filter(i => seasonOf(sequence.dates[i]) === selectedSeason) : all;
+  }, [sequence, selectedSeason]);
+
+  // 시즌 변경 시 재생 위치 처음으로
+  useEffect(() => { setPlayPos(0); }, [selectedSeason]);
+
+  const curOrigIdx  = frameIndices[playPos] ?? frameIndices[0] ?? 0;
+  const activeDate  = (playing && sequence && frameIndices.length) ? sequence.dates[curOrigIdx] : viewDate;
+  const curMonthKey = activeDate ? activeDate.slice(0, 7) : null;
+
+  // ▶/⏸ 토글. 첫 재생 시 시퀀스를 한 번 로드(≈0.5MB)해 캐시한다.
+  const togglePlay = useCallback(async () => {
+    if (playing) {                                  // 정지 → 멈춘 날짜로 고정(상세/정합 복귀)
+      setPlaying(false);
+      if (sequence && frameIndices.length) setViewDate(sequence.dates[frameIndices[playPos]]);
+      return;
+    }
+    let seq = sequence;
+    if (!seq) {
+      setSeqLoading(true);
+      seq = await fetchSequence();
+      setSeqLoading(false);
+      if (!seq) return;                             // 로드 실패 — 재생 안 함
+      setSequence(seq);
+    }
+    setPlayPos(0);                                  // 선택 시즌(또는 전체)의 처음부터
+    onClearSite?.();                                // 재생 중엔 선택 해제(전체 색칠 일관)
+    setPlaying(true);
+  }, [playing, sequence, frameIndices, playPos, onClearSite]);
+
+  // 프레임 진행 (일단위, 배속 반영). 끝에 닿으면 정지하고 마지막 날짜로 고정.
   useEffect(() => {
-    if (!playing || seasonMonths.length === 0) return;
+    if (!playing || !sequence || frameIndices.length === 0) return;
     const id = setInterval(() => {
-      setViewDate(prev => {
-        const ym = prev ? prev.slice(0, 7) : null;
-        const i = seasonMonths.findIndex(m => m.key === ym);
-        return seasonMonths[(i + 1) % seasonMonths.length].date;
+      setPlayPos(p => {
+        const next = p + 1;
+        if (next >= frameIndices.length) {
+          setPlaying(false);
+          setViewDate(sequence.dates[frameIndices[frameIndices.length - 1]]);
+          return p;
+        }
+        return next;
       });
-    }, 1500);
+    }, Math.round(140 / speed));
     return () => clearInterval(id);
-  }, [playing, seasonMonths]);
+  }, [playing, sequence, frameIndices, speed]);
+
+  // 프레임 색칠 — geoJsonRef 레이어를 직접 setStyle (remount 없이, 바뀐 어장만 → 성능).
+  useEffect(() => {
+    if (!playing || !sequence || frameIndices.length === 0) return;
+    const layer = geoJsonRef.current;
+    if (!layer) return;
+    const origIdx = frameIndices[playPos];
+    layer.eachLayer(sub => {
+      const gid  = String(sub.feature.properties.gid);
+      const s    = sequence.codes[gid];
+      const code = s ? s[origIdx] : '.';
+      if (sub._tlCode === code) return;             // 이전 프레임과 같으면 skip
+      sub._tlCode = code;
+      sub.setStyle(riskStyle(SEQ_CODE_RISK[code]));
+    });
+  }, [playPos, playing, sequence, frameIndices]);
+
+  // 정지 시 레이어의 _tlCode 캐시 정리 — 다음 재생이 첫 프레임을 온전히 다시 칠하도록.
+  // (remount 안 되는 경우 = 멈춘 날짜가 현재 preds.date와 같을 때 캐시 잔존 방지.)
+  useEffect(() => {
+    if (playing) return;
+    geoJsonRef.current?.eachLayer(s => { delete s._tlCode; });
+  }, [playing]);
 
   // 1194개 전체 어장 → farm 객체 배열 (score = v13 실예측, 없으면 null)
   const farms = useMemo(() => kimAllPolygons.features
@@ -703,7 +783,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
   // 선택된 양식장 강조 비콘(타겟 리티클) — 선택 중 계속 표시돼 어디 골랐는지 한눈에
   const selIcon = useMemo(() => L.divIcon({
     className: '',
-    html: '<div class="sel-beacon"><div class="p"></div><div class="retic"></div><div class="ring"></div><div class="dot"></div></div>',
+    html: '<div class="sel-beacon"><div class="ring"></div><div class="dot"></div></div>',
     iconSize: [46, 46], iconAnchor: [23, 23],
   }), []);
 
@@ -723,26 +803,29 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
   const hasSelection = !!selectedSite;
 
   // 선택/dimming 시 GeoJSON 레이어 스타일 직접 업데이트 (전체 리렌더 없이)
+  // ⚠️ 재생 중엔 프레임 색칠 effect가 색을 관리하므로 이 effect는 손대지 않는다
+  //    (재생 시작 시 onClearSite로 selectedSite가 바뀌면 여기가 발동해 프레임색을 덮는 것 방지).
   useEffect(() => {
+    if (playing) return;
     const layer = geoJsonRef.current;
     if (!layer) return;
     layer.eachLayer(sub => {
       const p          = sub.feature.properties;
       const isSelected = selectedSite?.id === String(p.gid);
-      const dimmed     = hasSelection && !isSelected;
       const score      = realScore(preds, p.gid);
       const risk       = farmRisk(preds, p.gid);
       const col        = scoreColor(score, risk);
 
       if (isSelected) {
-        sub.setStyle({ color: '#00E5FF', weight: 4, fillColor: col, fillOpacity: 0.5, dashArray: null });
-      } else if (dimmed) {
-        sub.setStyle({ color: 'rgba(0,200,255,0.08)', weight: 0.5, fillColor: 'rgba(0,180,255,1)', fillOpacity: 0.02, dashArray: null });
+        // 선택 어장 — 굵은 실선 형광 테두리로 확실히 구분 + 맨 위로 올려 안 가리게.
+        sub.setStyle({ color: '#5FFBF1', weight: 5, fillColor: col, fillOpacity: 0.55, dashArray: null, opacity: 1 });
+        sub.bringToFront();
       } else {
+        // 비선택 어장은 원래 등급 스타일 그대로 유지 (점선 등급 구분 보존 — dimming 안 함).
         sub.setStyle(riskStyle(risk));
       }
     });
-  }, [selectedSite?.id, hasSelection, preds]); // eslint-disable-line
+  }, [selectedSite?.id, hasSelection, preds, playing]); // eslint-disable-line
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -767,7 +850,15 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
           key={preds ? `v13-${preds.date}` : 'nodata'}   // 예측 도착 시 재렌더(스타일 재적용)
           ref={geoJsonRef}
           data={kimAllPolygons}
-          style={feature => riskStyle(farmRisk(preds, feature.properties.gid))}
+          style={feature => {
+            // 선택 어장만 style prop 단계에서도 형광 테두리로 — remount/리렌더에도 상시 유지.
+            // 나머지 어장은 원래 등급 스타일(점선 포함) 그대로 둔다 (dimming 안 함).
+            const gid  = String(feature.properties.gid);
+            const risk = farmRisk(preds, gid);
+            if (!playing && selectedSite?.id === gid)
+              return { color: '#5FFBF1', weight: 5, fillColor: scoreColor(realScore(preds, gid), risk), fillOpacity: 0.55, dashArray: null, opacity: 1 };
+            return riskStyle(risk);
+          }}
           onEachFeature={(feature, layer) => {
             const p     = feature.properties;
             const score = realScore(preds, p.gid);
@@ -919,36 +1010,74 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         </div>
       </div>
 
-      {/* 하단 연도+월 타임라인 (양식기 11~5월) + ▶ 자동재생 — 황백화 확산 애니메이션 */}
+      {/* 하단 타임라인 (양식기 11~5월) + ▶ 일단위 타임랩스 — 황백화 확산 애니메이션 */}
       {seasonMonths.length > 0 && (
         <div style={{
           position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 641,
-          display: 'flex', alignItems: 'center', gap: 8, maxWidth: '92%',
+          display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '92%',
           background: 'rgba(5,11,24,0.9)', border: '1px solid rgba(0,229,255,0.28)',
           borderRadius: 10, padding: '8px 12px', backdropFilter: 'blur(12px)',
         }}>
-          <button onClick={() => setPlaying(p => !p)} title="양식기 자동재생" style={{
-            flexShrink: 0, width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: 12,
-            color: '#050B18', background: '#00E5FF', border: 'none', fontWeight: 900, lineHeight: 1,
-          }}>{playing ? '⏸' : '▶'}</button>
-          <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0 }}>양식기</span>
-          <div style={{ display: 'flex', gap: 3, overflowX: 'auto', maxWidth: '60vw', scrollbarWidth: 'thin' }}>
-            {seasonMonths.map(m => {
-              const on = m.key === curMonthKey;
-              return (
-                <button key={m.key} onClick={() => { setPlaying(false); setViewDate(m.date); }}
-                  style={{
-                    flexShrink: 0, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, padding: '4px 7px', borderRadius: 5,
-                    fontFamily: 'Courier New,monospace', whiteSpace: 'nowrap',
-                    background: on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.05)',
-                    border: `1px solid ${on ? 'rgba(0,229,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
-                    color: on ? '#00E5FF' : 'rgba(255,255,255,0.6)',
-                  }}>
-                  {String(m.year).slice(2)}.{String(m.month).padStart(2, '0')}
-                </button>
-              );
-            })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={togglePlay} disabled={seqLoading} title="양식기 일단위 타임랩스" style={{
+              flexShrink: 0, width: 28, height: 28, borderRadius: 6, cursor: seqLoading ? 'wait' : 'pointer', fontSize: 12,
+              color: '#050B18', background: '#00E5FF', border: 'none', fontWeight: 900, lineHeight: 1,
+            }}>{seqLoading ? '⏳' : playing ? '⏸' : '▶'}</button>
+            {/* 배속 (1x→2x→4x 순환) */}
+            <button onClick={() => setSpeed(s => (s >= 4 ? 1 : s * 2))} title="재생 배속" style={{
+              flexShrink: 0, height: 28, minWidth: 34, padding: '0 7px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+              fontFamily: 'Courier New,monospace', fontWeight: 800, lineHeight: 1,
+              color: '#00E5FF', background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.4)',
+            }}>{speed}×</button>
+            {/* 재생 중 현재 날짜 (타임랩스 진행 표시) */}
+            {playing && activeDate
+              ? <span style={{ fontSize: 11, color: '#00E5FF', fontFamily: 'Courier New,monospace', fontWeight: 700, letterSpacing: 0.5, flexShrink: 0, minWidth: 82 }}>{activeDate}</span>
+              : <span style={{ fontSize: 9, color: 'rgba(0,229,255,0.55)', fontFamily: 'Courier New', letterSpacing: 1, flexShrink: 0 }}>양식기</span>}
+            {/* 시즌 선택 (전체 / 각 시즌) */}
+            {seasons.length > 1 && (
+              <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                {[null, ...seasons].map(s => {
+                  const on = selectedSeason === s;
+                  const label = s ? s.split('-').map(y => y.slice(2)).join('–') : '전체';
+                  return (
+                    <button key={s ?? 'all'} onClick={() => { setPlaying(false); setSelectedSeason(s); }}
+                      title={s ? `${s} 시즌` : '전체 시즌'}
+                      style={{
+                        cursor: 'pointer', fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 5,
+                        fontFamily: 'Courier New,monospace', whiteSpace: 'nowrap',
+                        background: on ? 'rgba(0,229,255,0.28)' : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${on ? '#00E5FF' : 'rgba(255,255,255,0.12)'}`,
+                        color: on ? '#00E5FF' : 'rgba(255,255,255,0.6)',
+                      }}>{label}</button>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 3, overflowX: 'auto', maxWidth: '48vw', scrollbarWidth: 'thin' }}>
+              {seasonMonths.filter(m => !selectedSeason || seasonOf(m.date) === selectedSeason).map(m => {
+                const on = m.key === curMonthKey;
+                return (
+                  <button key={m.key} onClick={() => { setPlaying(false); setViewDate(m.date); }}
+                    style={{
+                      flexShrink: 0, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, padding: '4px 7px', borderRadius: 5,
+                      fontFamily: 'Courier New,monospace', whiteSpace: 'nowrap',
+                      background: on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${on ? 'rgba(0,229,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                      color: on ? '#00E5FF' : 'rgba(255,255,255,0.6)',
+                    }}>
+                    {String(m.year).slice(2)}.{String(m.month).padStart(2, '0')}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+          {/* 진행바 — 선택 시즌 범위 내 재생 진행도(클릭 시 해당 시점으로 점프) */}
+          {sequence && frameIndices.length > 1 && (
+            <input type="range" min={0} max={frameIndices.length - 1} value={playPos}
+              onChange={e => { const p = Number(e.target.value); setPlayPos(p); if (!playing) setPlaying(true); }}
+              title="타임랩스 위치"
+              style={{ width: '100%', height: 4, accentColor: '#00E5FF', cursor: 'pointer' }} />
+          )}
         </div>
       )}
 
