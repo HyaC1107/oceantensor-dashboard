@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchRealSensorByLatLon, fetchRealSensorHistoryByLatLon, provenanceLabel } from '../../data/realSensor';
 import { STAGE_LABEL, RISK, normalizeRisk } from '../../data/v13Predictions';
@@ -105,7 +105,7 @@ function SectionLabel({ children }) {
   );
 }
 
-export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGoXai }) {
+export default function FarmDetailCard({ site, viewDate, onClose, maxH, onDragHandle, onGoXai }) {
   if (!site) return null;
 
   const col = riskColorOf(site);      // 지도와 동일한 등급 색
@@ -143,10 +143,13 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
     dip:  realSensor.raw_ugl?.dip ?? 0,
     np:   realSensor.sensor_vals.np_ratio,
   } : mock;
-  // 비양식기/예측없음이면 site.score === null → 점수를 지어내지 않고 '예측 없음'으로 표시
-  const hasScore  = typeof site.score === 'number' && Number.isFinite(site.score);
-  const isAnomaly = hasScore && site.score > 0.5;
-  const animScore = useCountUp(hasScore ? site.score : 0);
+  // 🔴 2026-07-17: '위험도'로 **site.score를 쓰던 것을 warn(실제 7일내 발생확률)으로 교체**.
+  //   score = RISK_WEIGHT[risk] 파생이라 **등급별 고정 상수**였다(주의면 어느 어장이든 0.45).
+  //   실제 값이 아닌 숫자를 "위험도 0.45"로 표시해 오독을 유발했다(PM 스크린샷: 위험도 0.45 +
+  //   발생확률 0% 동시 표기). score는 지도의 강조 강도 계산용으로만 남긴다.
+  const hasScore  = typeof site.warn === 'number' && Number.isFinite(site.warn);
+  const isAnomaly = hasScore && site.warn >= 0.5;
+  const animScore = useCountUp(hasScore ? site.warn : 0);
 
   const [scanning, setScanning] = useState(true);
   useEffect(() => {
@@ -155,22 +158,36 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
     return () => clearTimeout(t);
   }, [site.id]);
 
-  // v13 예측 fetch — 이제 1194개 전 어장이 gid 키로 팩에 있으므로 **직접 조회**
-  // (기존의 '최근접 F어장 매핑' 임시방편은 제거됨 — 근사 없이 이 어장의 실제 예측)
+  // v13 예측 시계열 fetch — 1194개 전 어장이 gid 키로 팩에 있으므로 직접 조회.
+  //
+  // 🔴 2026-07-17: 기간이 `start=2025-10-01&end=2026-01-31`로 **하드코딩**돼 있었다.
+  //   그래서 지도에서 어느 날짜를 보든 카드의 "최신 예측"은 **항상 2026-01-31**이었고,
+  //   지도가 2026-05-20의 '주의'를 칠하는 동안 카드는 1월 31일의 '정상'을 띄웠다(PM 지적).
+  //   → 지도가 실제로 보고 있는 날짜(viewDate = preds.date)를 끝으로, 그 직전 60일을 조회한다.
+  const endDate = viewDate ?? null;
+  const startDate = useMemo(() => {
+    if (!endDate) return null;
+    const d = new Date(`${endDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 59);          // 추이 차트가 쓰는 60일
+    return d.toISOString().slice(0, 10);
+  }, [endDate]);
+
   const [v7Series, setV7Series] = useState(null);
   const [v7Loading, setV7Loading] = useState(false);
   useEffect(() => {
     setV7Series(null);
+    if (!endDate) { setV7Loading(false); return; }   // 비양식기 등 — 지도도 예측 없음
     setV7Loading(true);
     const ctrl = new AbortController();
-    fetch(`${API_BASE}/predict/v7/${site.id}?start=2025-10-01&end=2026-01-31`, { signal: ctrl.signal })
+    fetch(`${API_BASE}/predict/v7/${site.id}?start=${startDate}&end=${endDate}`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(d => { setV7Series(d?.series ?? null); setV7Loading(false); })
       .catch(() => { if (!ctrl.signal.aborted) setV7Loading(false); });
     return () => ctrl.abort();
-  }, [site.id]);
+  }, [site.id, startDate, endDate]);
 
-  const latest = v7Series?.[v7Series.length - 1];
+  // "최신 예측" = 지도가 보고 있는 그 날짜의 엔트리. 없으면 시계열 마지막으로 폴백.
+  const latest = v7Series?.find(p => p.date === endDate) ?? v7Series?.[v7Series.length - 1];
   // 색·라벨 = risk(warn 기반, 지도와 동일). stage는 색을 결정하지 않는다.
   const lc     = latest ? riskColorOf(latest) : '#888';
   const lLabel = latest ? riskLabelOf(latest) : '예측 없음';
@@ -290,11 +307,11 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
         <div style={{ marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.58)', fontFamily: 'Courier New', letterSpacing: 2 }}>
-              위험도
+              7일내 발생확률
             </span>
             {hasScore ? (
               <span style={{ fontSize: 30, fontWeight: 900, color: col, fontFamily: 'Courier New', lineHeight: 1 }}>
-                {animScore.toFixed(2)}
+                {(animScore * 100).toFixed(0)}<span style={{ fontSize: 16 }}>%</span>
               </span>
             ) : (
               <span style={{ fontSize: 13, fontWeight: 700, color: 'rgba(190,205,225,0.85)' }}>
@@ -304,11 +321,12 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
           </div>
           {hasScore && (
             <div style={{ height: 10, borderRadius: 4, overflow: 'hidden', position: 'relative', background: 'rgba(255,255,255,0.05)' }}>
-              {[[0,0.4,'#00FF8830'],[0.4,0.6,'#FFD70030'],[0.6,0.8,'#FF8A3D30'],[0.8,1.0,'#FF4D4F30']].map(([f,t,bg]) => (
+              {/* 밴드 = 실제 등급 임계(warn 0.2 주의 / 0.5 고위험). 구 0.4/0.6/0.8은 또 다른 임의 체계였다. */}
+              {[[0, 0.2, `${RISK.normal.color}30`], [0.2, 0.5, `${RISK.watch.color}30`], [0.5, 1.0, `${RISK.sustained.color}30`]].map(([f, t, bg]) => (
                 <div key={f} style={{ position:'absolute', top:0, bottom:0, left:`${f*100}%`, width:`${(t-f)*100}%`, background:bg }}/>
               ))}
               <motion.div
-                initial={{ width: 0 }} animate={{ width: `${site.score * 100}%` }}
+                initial={{ width: 0 }} animate={{ width: `${site.warn * 100}%` }}
                 transition={{ duration: 0.9, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
                 style={{
                   position: 'absolute', top: 0, left: 0, height: '100%',

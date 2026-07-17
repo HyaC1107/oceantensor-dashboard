@@ -341,7 +341,7 @@ function LockOnOverlay({ isAnalyzing, selectedSite }) {
 }
 
 // ── 맵 위 플로팅 팜 카드 (드래그 이동 + 높이 자동 맞춤) ──────────
-function FloatingFarmCard({ selectedSite, mapRef, onClose, onGoXai }) {
+function FloatingFarmCard({ selectedSite, mapRef, onClose, onGoXai, viewDate }) {
   const [pos, setPos] = useState(null);
   const [cardH, setCardH] = useState(540);
   const [dragged, setDragged] = useState(false);   // 사용자가 옮기면 마커 추적 중단
@@ -450,6 +450,7 @@ function FloatingFarmCard({ selectedSite, mapRef, onClose, onGoXai }) {
         >
           <FarmDetailCard
             site={selectedSite}
+            viewDate={viewDate}
             onClose={onClose}
             maxH={maxH}
             onDragHandle={(e) => dragControls.start(e)}
@@ -768,6 +769,9 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         sido:    p.sido_nm,
         score,
         stage:   preds?.farms[String(p.gid)]?.stage ?? null,
+        // 카드가 '위험도'로 표시할 실제 값. score(RISK_WEIGHT 파생)는 등급별 고정 상수라 표시용이 아니다.
+        warn:    preds?.farms[String(p.gid)]?.warn ?? null,
+        adi7:    preds?.farms[String(p.gid)]?.adi7 ?? null,
         outOfGrid: preds?.outOfGrid.has(String(p.gid)) ?? false,
         risk,
         severity: scoreSev(score, risk),
@@ -1107,7 +1111,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
       <LockOnOverlay isAnalyzing={isAnalyzing} selectedSite={selectedSite} />
 
       {/* 맵 위 플로팅 팜 카드 */}
-      <FloatingFarmCard selectedSite={selectedSite} mapRef={mapRef} onClose={onClearSite} onGoXai={onGoXai} />
+      <FloatingFarmCard selectedSite={selectedSite} mapRef={mapRef} onClose={onClearSite} onGoXai={onGoXai} viewDate={preds?.date ?? null} />
 
       {/* 센서 오버레이 — 상단 검색/툴바 아래로 내려 겹치지 않게 */}
       <div style={{
