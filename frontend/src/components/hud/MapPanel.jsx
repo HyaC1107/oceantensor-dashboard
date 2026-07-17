@@ -1131,10 +1131,13 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount[k]}</span>
             </div>
           ))}
-          {/* 임계값은 백엔드 risk_thresholds(SSOT)에서 받아 표시 — 하드코딩하면 백엔드와 갈라진다 */}
+          {/* 임계값은 백엔드 risk_thresholds(SSOT)에서 받아 표시 — 하드코딩하면 백엔드와 갈라진다.
+              ⚠️ 이 색은 warn(발생확률) 축이다. 상세카드의 '예측 강도(정상/초기/경계/심각)'는
+                 adi7 축이라 등급 수가 다르다 — 둘을 같은 4단계로 합치지 말 것(축이 다름). */}
           <div style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.38)', marginTop: 5, lineHeight: 1.4, maxWidth: 190 }}>
             🔴 고위험 = 발생확률 {((preds?.riskThresholds?.sustained ?? 0.5) * 100).toFixed(0)}% 이상<br/>
-            🟡 주의 = {((preds?.riskThresholds?.watch ?? 0.2) * 100).toFixed(0)}% 이상
+            🟡 주의 = {((preds?.riskThresholds?.watch ?? 0.2) * 100).toFixed(0)}% 이상<br/>
+            <span style={{ opacity: 0.75 }}>※ 색 = 7일내 발생확률. 강도(ADI 4단계)는 어장 선택 시 표시</span>
           </div>
         </div>
 

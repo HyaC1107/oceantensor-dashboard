@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchRealSensorByLatLon, fetchRealSensorHistoryByLatLon, provenanceLabel } from '../../data/realSensor';
-import { STAGE_LABEL } from '../../data/v13Predictions';
+import { STAGE_LABEL, RISK, normalizeRisk } from '../../data/v13Predictions';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -24,17 +24,17 @@ function useCountUp(target, duration = 850, delay = 180) {
   return val;
 }
 
-function scoreColor(s) {
-  if (s > 0.8) return '#FF4D4F';
-  if (s > 0.6) return '#FF8A3D';
-  if (s > 0.4) return '#FFD700';
-  return '#00FF88';
+// 🔴 2026-07-17: 색·라벨 SSOT를 risk(warn 기반 등급)로 통일.
+//   이전엔 score(=RISK_WEIGHT 파생)를 0.4/0.6/0.8로 다시 자르는 **또 다른 임계 체계**였고,
+//   RISK_WEIGHT 값이 우연히 이 임계와 맞아떨어져 동작하던 취약한 결합이었다.
+//   이제 site.risk(지도가 칠하는 그 등급)를 직접 받는다.
+function riskColorOf(site) {
+  const r = normalizeRisk(site?.risk);
+  return r ? RISK[r].color : '#8899aa';        // 예측 없음 = 중립
 }
-function scoreSev(s) {
-  if (s > 0.8) return 'DANGER';
-  if (s > 0.6) return 'WARNING';
-  if (s > 0.4) return 'CAUTION';
-  return 'NORMAL';
+function riskLabelOf(site) {
+  const r = normalizeRisk(site?.risk);
+  return r ? RISK[r].label : '예측 없음';
 }
 
 // 황백화 지표 색상 (단위: μg/L)
@@ -85,6 +85,9 @@ function Sparkline({ color, series }) {
 
 // stage 라벨 SSOT = data/v13Predictions.js STAGE_LABEL (지도·XAI와 공유).
 // 2026-07-17: 여기 따로 정의돼 있던 V7_LABELS를 제거하고 공용 상수로 통일했다(라벨 3중 불일치 해소).
+//
+// ⚠️ V7_COLORS는 **아래 'stage 추이' 차트 전용**이다(그 차트의 축이 stage 자체라 정당).
+//    카드 주 지표의 색은 risk(warn)로 통일했으므로 여기 색을 다른 곳에 재사용하지 말 것.
 const V7_COLORS = { 0: '#00FF88', 1: '#FFD700', 2: '#FF8A3D', 3: '#FF4D4F' };
 const V7_LABELS = STAGE_LABEL;
 
@@ -105,8 +108,8 @@ function SectionLabel({ children }) {
 export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGoXai }) {
   if (!site) return null;
 
-  const col = scoreColor(site.score);
-  const sev = scoreSev(site.score);
+  const col = riskColorOf(site);      // 지도와 동일한 등급 색
+  const sev = riskLabelOf(site);      // 고위험 / 주의 / 정상 / 예측 없음
 
   // 실측(Bronze) 센서 — 최근접 관측소. 실패 시 기존 mock 폴백.
   const [realSensor, setRealSensor] = useState(null);
@@ -168,7 +171,9 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
   }, [site.id]);
 
   const latest = v7Series?.[v7Series.length - 1];
-  const lc     = V7_COLORS[latest?.stage] ?? '#888';
+  // 색·라벨 = risk(warn 기반, 지도와 동일). stage는 색을 결정하지 않는다.
+  const lc     = latest ? riskColorOf(latest) : '#888';
+  const lLabel = latest ? riskLabelOf(latest) : '예측 없음';
   const recent = v7Series?.slice(-60) ?? [];
 
   return (
@@ -333,23 +338,35 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
           )}
           {!v7Loading && v7Series && (
             <>
+              {/* 🔴 2026-07-17: 주 지표를 **발생확률(warn)** 로 교체. 색도 지도와 같은 risk 등급.
+                  이전엔 stage(=adi7 파생)가 크게·색으로 주인공이었는데, 지도는 warn 기준이라
+                  같은 어장이 **지도 '정상'(초록)인데 카드엔 '초기'(노랑)** 로 갈렸다(PM 지적).
+                  예: gid 11925 진도군 의신면 — warn 0.0608(정상) / stage 1(초기).
+                  둘 다 사실이지만 축이 다르다 → 색은 warn 하나로, stage는 보조 텍스트로 내린다. */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div>
                   <div style={{ fontSize: 10, color: 'rgba(0,229,255,0.5)', fontFamily: 'Courier New', letterSpacing: 2, marginBottom: 4 }}>
                     최신 예측 · {latest?.date}
                   </div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: lc, fontFamily: 'Courier New' }}>
-                    {V7_LABELS[latest?.stage]}
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.58)', marginLeft: 8, fontWeight: 400 }}>
-                      stage {latest?.stage}
-                    </span>
+                    {lLabel}
+                    {typeof latest?.warn === 'number' && (
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginLeft: 8, fontWeight: 400 }}>
+                        7일내 발생확률 {(latest.warn * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                  {/* 보조: 예측 강도(ADI) — 색을 주지 않는다(축이 다름) */}
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontFamily: 'Courier New', marginTop: 3 }}>
+                    예측 강도 {STAGE_LABEL[latest?.stage] ?? '?'} (stage {latest?.stage}
+                    {Array.isArray(latest?.adi7) ? ` · ADI 최대 ${Math.max(...latest.adi7).toFixed(1)}` : ''})
                   </div>
                 </div>
                 <div style={{
                   padding: '4px 10px', borderRadius: 4, fontSize: 10,
                   background: `${lc}18`, border: `1px solid ${lc}55`, color: lc,
                   fontFamily: 'Courier New', letterSpacing: 1,
-                }}>STMMT v7</div>
+                }}>STMMT v13</div>
               </div>
               <div style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'Courier New', letterSpacing: 2, marginBottom: 6 }}>
