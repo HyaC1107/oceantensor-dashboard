@@ -68,37 +68,48 @@ def _load() -> tuple[str, dict]:
     return "stmmt-v13", base
 
 
-# ── 위험 등급: onset(전이) 기반 ────────────────────────────────────────────
-# 왜 stage(ADI 회귀헤드 파생)를 안 쓰나:
-#   회귀헤드는 v12·v13·v14 전 평가에서 persistence에 열세였고, 그걸로 칠하면
-#   1년 내내 ~40% 어장이 "진행"으로 빨갛게 나온다(실제 사건은 11~1월 집중).
-# 모델의 검증된 강점은 **warn onset**(전이 탐지, 무누수 홀드아웃 +3.3pt vs persistence)이다.
-#   → "전일 대비 발생확률 급등(Δwarn)"을 경보로 쓰고,
-#     이미 높은 상태의 지속은 persistence 영역이라 별도 등급으로 분리한다.
-ONSET_TH     = 0.15   # Δwarn ≥ 0.15 → 급등 경보 (실측 분포상 상위 ~1%, 하루 평균 12개 어장)
-SUSTAINED_TH = 0.50   # warn ≥ 0.5 이면서 급등은 아님 → 고위험 지속(관성)
+# ── 위험 등급: warn 절대값 기반 ────────────────────────────────────────────
+# 🔴 2026-07-17: Δwarn(전일 대비 급등) 기반 "급등 경보" 판정을 **제거**했다.
+#
+# 제거 이유 — 실측(`analysis/onset_eval6_delta.py`, val=안 본 25-26시즌 1.3억 픽셀):
+#   Δwarn 의 onset 예측 AUC = **0.3852(warn) / 0.4696(severe)** → 무작위(0.5)보다 나쁜 음의 상관.
+#   (warn이 이미 높은 곳은 포화되어 Δ≈0인데 거기가 정작 양성이고,
+#    warn 낮은 곳에서 노이즈로 Δ가 양수로 튄다 → Δ가 클수록 음성)
+#   반면 같은 표본에서 **warn 절대값 AUC = 0.9772 / 0.9877** 로 유효하다.
+#
+# 왜 애초에 Δwarn을 썼었나 (재발 방지용 기록):
+#   "warn onset 탐지가 검증된 강점(+3.3pt vs persistence)"이라는 근거로 Δwarn을 채택했으나,
+#   그 +3.3pt는 **warn 절대값**의 성적이었다. "onset 탐지가 강하다"에서 "Δ로 칠하자"로 건너뛴
+#   논리 비약이었고, Δwarn 자체는 2026-07-17까지 한 번도 평가된 적이 없었다.
+#
+# ⚠️ 남은 한계 (임계값으로 못 고침 — 모델 재학습 영역):
+#   warn/severe/adi7 출력이 전부 **이진 포화**(median 0.000 / p75 0.989 / p90 1.000)라
+#   임계값을 0.5→0.9567로 올려도 28.98%→26.41%로 2.5%p밖에 안 줄어든다.
+#   즉 "상시 ~29% 위험 표시"는 여기서 조정할 수 없다. 원인 추정 = 학습의 focal_gamma=3.0.
+SUSTAINED_TH = 0.50   # warn ≥ 0.5 → 고위험
 WATCH_TH     = 0.20   # 주의
 
 RISK_LABELS = {
-    "onset":     "급등 경보",
-    "sustained": "고위험 지속",
+    "sustained": "고위험",
     "watch":     "주의",
     "normal":    "정상",
 }
 
 
-def _risk_class(warn: float, onset: Optional[float]) -> str:
-    if onset is not None and onset >= ONSET_TH:
-        return "onset"                     # ★ AI의 검증된 강점 — 새 위험의 시작
+def _risk_class(warn: float) -> str:
+    """warn(7일내 발생확률) 절대값 → 위험 등급. (모듈 내부 전용)"""
     if warn >= SUSTAINED_TH:
-        return "sustained"                 # 이미 높음 (persistence로도 알 수 있는 정보)
+        return "sustained"
     if warn >= WATCH_TH:
         return "watch"
     return "normal"
 
 
 def _farm_entry(raw, prev=None) -> dict:
-    """구 팩(int stage) / 신 팩(dict) → 공통 스키마 + onset 위험등급."""
+    """구 팩(int stage) / 신 팩(dict) → 공통 스키마 + warn 절대값 기반 위험등급.
+
+    `onset`(Δwarn)은 참고 지표로 응답에 실어주되 **등급 판정에는 쓰지 않는다**(AUC 0.385).
+    """
     if not isinstance(raw, dict):
         return {"stage": raw, "stage_label": STAGE_LABELS.get(raw, "??")}
 
@@ -113,8 +124,8 @@ def _farm_entry(raw, prev=None) -> dict:
         onset = round(warn - float(prev["warn"]), 4)
 
     entry["warn_prev"] = None if not isinstance(prev, dict) else prev.get("warn")
-    entry["onset"] = onset
-    entry["risk"] = _risk_class(warn, onset)
+    entry["onset"] = onset          # 참고용 노출 — 판정에는 미사용
+    entry["risk"] = _risk_class(warn)
     entry["risk_label"] = RISK_LABELS[entry["risk"]]
     return entry
 
@@ -168,7 +179,9 @@ def get_v7_by_date(date: str = Query(..., description="YYYY-MM-DD")):
         "season_note": None if in_season
                        else "비양식기(6~10월) — 김 양식 기간이 아니며, 학습 시 IGNORE 구간이라 예측을 표시하지 않음",
         "prev_date": pdate,
-        "onset_threshold": ONSET_TH,
+        # onset_threshold 제거(2026-07-17) — Δwarn 판정 폐기. 하위호환 위해 키는 남기되 null.
+        "onset_threshold": None,
+        "risk_thresholds": {"sustained": SUSTAINED_TH, "watch": WATCH_TH},
         "risk_counts": counts,
         "farms": farms,
         "out_of_grid_farms": data["meta"].get("out_of_grid_farms", []),
@@ -207,7 +220,7 @@ def get_season_info():
 def _build_sequence() -> Optional[dict]:
     """양식기(11~5월) 일단위 어장별 위험등급 시퀀스 (무거운 전량 계산 — 팩당 1회 캐시).
 
-    지도 색상 SSOT(`_risk_class`, onset 기반)를 그대로 재사용해 **전 어장 × 양식기 전 날짜**의
+    지도 색상 SSOT(`_risk_class`, warn 절대값 기준)를 그대로 재사용해 **전 어장 × 양식기 전 날짜**의
     risk 등급만 뽑아 열지향 문자열로 압축한다. `_load`(lru_cache)와 함께 캐시되므로
     팩 교체 후 백엔드 재시작 시 함께 무효화된다.
     """
@@ -219,29 +232,26 @@ def _build_sequence() -> Optional[dict]:
     if not dates:
         return None
 
-    CODE = {"onset": "3", "sustained": "2", "watch": "1", "normal": "0"}
+    # 코드 "3"(구 onset)은 2026-07-17 Δwarn 판정 폐기로 더 이상 생성되지 않는다.
+    CODE = {"sustained": "2", "watch": "1", "normal": "0"}
     gids = sorted({g for d in dates for g in preds[d].keys()})
     codes: dict[str, list[str]] = {g: [] for g in gids}
 
+    # 등급이 warn 절대값만으로 결정되므로 전일 프레임 조회(_prev_date)가 불필요해졌다.
     for d in dates:
         frame = preds[d]
-        pdate = _prev_date(preds, d)
-        prev_frame = preds.get(pdate, {}) if pdate else {}
         for g in gids:
             raw = frame.get(g)
             if not isinstance(raw, dict):
                 codes[g].append(".")          # 그날 그 어장 예측 없음
                 continue
-            warn = float(raw.get("warn", 0.0))
-            praw = prev_frame.get(g)
-            onset = (round(warn - float(praw["warn"]), 4)
-                     if isinstance(praw, dict) and "warn" in praw else None)
-            codes[g].append(CODE[_risk_class(warn, onset)])
+            codes[g].append(CODE[_risk_class(float(raw.get("warn", 0.0)))])
 
     return {
         "dates": dates,
         "codes": {g: "".join(v) for g, v in codes.items()},
-        "code_legend": {"3": "onset", "2": "sustained", "1": "watch", "0": "normal", ".": "none"},
+        # legend는 **현재 계약만** 선언한다. 구 "3"(onset)은 2026-07-17 폐기 후 생성되지 않으므로 뺐다.
+        "code_legend": {"2": "sustained", "1": "watch", "0": "normal", ".": "none"},
         "out_of_grid_farms": data["meta"].get("out_of_grid_farms", []),
     }
 
@@ -250,8 +260,9 @@ def _build_sequence() -> Optional[dict]:
 def get_v7_sequence():
     """양식기 일단위 위험등급 시퀀스 — 프론트 타임랩스 자동재생용(fetch 1회로 시즌 통째).
 
-    codes[gid] = 날짜순 등급 문자열. 문자: 3=onset / 2=sustained / 1=watch / 0=normal / .=예측없음.
-    색 판정은 `/predict/v7`와 동일한 `_risk_class`(onset 기반)를 쓴다.
+    codes[gid] = 날짜순 등급 문자열. 문자: 2=sustained / 1=watch / 0=normal / .=예측없음.
+    색 판정은 `/predict/v7`와 동일한 `_risk_class`(warn 절대값 기준)를 쓴다.
+    ※ 구 "3"(onset, Δwarn 기반)은 2026-07-17 폐기 — 더 이상 생성되지 않는다.
     """
     model_name, _ = _load()
     seq = _build_sequence()

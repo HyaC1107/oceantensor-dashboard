@@ -64,7 +64,8 @@ export async function loadPredictions(date) {
         isArchive: Boolean(date),            // 지난 시즌 열람 모드
         seasonNote: j.season_note ?? null,
         riskCounts: j.risk_counts ?? {},
-        onsetThreshold: j.onset_threshold,
+        // onsetThreshold 제거(2026-07-17) — Δwarn 판정 폐기로 백엔드가 항상 null을 준다.
+        riskThresholds: j.risk_thresholds ?? null,   // 등급 임계 SSOT(백엔드 v7.py) — 범례 표시에 사용
         farms: j.farms ?? {},
         outOfGrid: new Set(j.out_of_grid_farms ?? []),
       };
@@ -81,8 +82,10 @@ export async function loadPredictions(date) {
 /** 캐시 무효화 (날짜 전환 시) */
 export function resetPredictionsCache() { _cache = null; }
 
-/** 시퀀스 코드(문자) → risk 등급. 백엔드 /predict/v7-sequence 와 계약. */
-export const SEQ_CODE_RISK = { '3': 'onset', '2': 'sustained', '1': 'watch', '0': 'normal', '.': null };
+/** 시퀀스 코드(문자) → risk 등급. 백엔드 /predict/v7-sequence 와 계약.
+ *  '3'(구 onset)은 2026-07-17 판정 폐기로 더 이상 생성되지 않는다. 다만 구버전 캐시 응답이
+ *  섞여 들어와도 색이 사라지지 않도록 최고 등급(sustained)으로 흡수한다. */
+export const SEQ_CODE_RISK = { '3': 'sustained', '2': 'sustained', '1': 'watch', '0': 'normal', '.': null };
 
 let _seqCache = null;
 /**
@@ -142,22 +145,38 @@ export function stageToScore(stage) {
 export const STAGE_LABEL = { 0: '정상', 1: '초기', 2: '경계', 3: '심각' };
 
 /**
- * ★ 지도 색상 SSOT — onset(전이) 기반 위험 등급.
+ * ★ 지도 색상 SSOT — warn(7일내 발생확률) **절대값** 기반. 백엔드 `v7.py:_risk_class`와 계약.
  *
- * stage(ADI 회귀헤드 파생)로 칠하면 1년 내내 ~40% 어장이 빨갛게 나온다.
- * 그 회귀헤드는 모든 평가에서 persistence에 열세였던 **모델의 약점**이기 때문이다.
- * 모델의 검증된 강점은 warn **onset**(전이 탐지, 무누수 홀드아웃 +3.3pt vs persistence)이므로,
- * "전일 대비 발생확률 급등"을 경보로 쓰고, 이미 높은 상태의 지속은 별도 등급으로 분리한다.
+ * 🔴 2026-07-17: Δwarn(전일 대비 급등) 기반 `onset` 등급을 **제거**했다.
+ *   실측(analysis/onset_eval6_delta.py, 안 본 25-26시즌 1.3억 픽셀):
+ *   Δwarn 의 onset 예측 AUC = 0.3852(warn)/0.4696(severe) → **무작위(0.5)보다 나쁨**.
+ *   같은 표본에서 warn 절대값은 AUC 0.9772/0.9877 로 유효 → 절대값 기준으로 전환.
+ *   (기존에 Δwarn을 쓴 근거였던 "+3.3pt"는 사실 **warn 절대값**의 성적이었다. 논리 비약이었음.)
+ *
+ * ⚠️ 남은 한계: 모델 출력이 이진 포화(median 0 / p75 0.989)라 상시 ~29%가 '고위험'으로 표시된다.
+ *   임계값으로 조정 불가(0.5→0.96 올려도 29%→26%) — 재학습(focal_gamma) 영역.
  */
 export const RISK = {
-  onset:     { color: '#FF4D4F', label: '급등 경보',    desc: '전일 대비 7일내 발생확률 급등 — AI 조기경보' },
-  sustained: { color: '#FF8A3D', label: '고위험 지속',  desc: '이미 높은 위험이 유지됨 (관성 — 규칙기반으로도 포착)' },
-  watch:     { color: '#FFD700', label: '주의',        desc: '발생확률 중간' },
-  normal:    { color: '#00FF88', label: '정상',        desc: '발생확률 낮음' },
+  // onset: 2026-07-17 제거. 백엔드가 더 이상 이 값을 반환하지 않는다. (아래 normalizeRisk가 흡수)
+  // desc에 임계 수치를 박지 않는다 — 수치 SSOT는 백엔드 risk_thresholds(범례가 그걸 받아 표시)
+  sustained: { color: '#FF4D4F', label: '고위험',  desc: '7일내 발생확률 높음' },
+  watch:     { color: '#FFD700', label: '주의',    desc: '발생확률 중간' },
+  normal:    { color: '#00FF88', label: '정상',    desc: '발생확률 낮음' },
 };
+
+/**
+ * 구버전 등급명 흡수. 구 HTTP 캐시가 `risk:"onset"`을 뱉을 수 있는데, 그대로 두면
+ * RISK에 키가 없어 **회색('예측 없음')으로 그려진다 — 위험이 안전해 보이는 잘못된 fail-safe**.
+ * 구 onset은 경보 등급이었으므로 최고 등급으로 올려서 흡수한다(시퀀스 SEQ_CODE_RISK와 동일 정책).
+ */
+export function normalizeRisk(risk) {
+  if (!risk) return null;
+  if (RISK[risk]) return risk;
+  return 'sustained';   // 미지 등급(구 onset 등) → 안전한 쪽(경보)으로
+}
 
 /** 어장 엔트리 → 색상 (예측 없으면 null) */
 export function riskColor(entry) {
-  if (!entry?.risk) return null;
-  return RISK[entry.risk]?.color ?? null;
+  const r = normalizeRisk(entry?.risk);
+  return r ? RISK[r].color : null;
 }

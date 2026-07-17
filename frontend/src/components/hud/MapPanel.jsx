@@ -7,37 +7,44 @@ import { fetchRealSensorByLatLon, provenanceLabel } from '../../data/realSensor'
 import 'leaflet/dist/leaflet.css';
 import FarmDetailCard from './FarmDetailCard';
 import FarmPicker from '../FarmPicker';
-import { loadPredictions, resetPredictionsCache, RISK, fetchSeasonMonths, fetchSequence, SEQ_CODE_RISK } from '../../data/v13Predictions';
+import { loadPredictions, resetPredictionsCache, RISK, normalizeRisk, fetchSeasonMonths, fetchSequence, SEQ_CODE_RISK } from '../../data/v13Predictions';
 
 const NO_DATA_COLOR = 'rgba(150,165,190,0.55)';   // 예측 없음/비양식기 — 중립 회색
 
-// ── 색상 헬퍼 — onset(전이) 기반 위험등급 ─────────────────────
+// ── 색상 헬퍼 — warn(7일내 발생확률) 절대값 기반 위험등급 ─────────────────────
 // score(0~1)는 강조 강도로만 쓴다. 색은 risk 등급이 결정.
-const RISK_WEIGHT = { onset: 0.95, sustained: 0.7, watch: 0.45, normal: 0.15 };
+// 🔴 2026-07-17: onset(Δwarn) 등급 제거 — 실측 AUC 0.385로 무작위 이하였다.
+//    상세 근거: data/v13Predictions.js RISK 주석 / app/routers/v7.py _risk_class 주석
+const RISK_WEIGHT = { sustained: 0.95, watch: 0.45, normal: 0.15 };   // sustained가 이제 최고 등급
 
-// 등급별 폴리곤 스타일 — '급등'만 도드라지게, '지속'은 배경 맥락으로 낮춘다.
-// (지속은 persistence로도 알 수 있는 정보라 시각적 경보 가치가 낮음. 40% 어장이 여기 해당)
+// 등급별 폴리곤 스타일. 최고 등급(고위험)을 도드라지게.
+// ⚠️ 모델 출력이 이진 포화라 고위험이 상시 ~29% 나온다(임계값으로 조정 불가, 재학습 영역).
+//    그래서 fillOpacity를 낮게 유지해 지도가 통째로 빨개지지 않도록 한다.
 const RISK_STYLE = {
-  onset:     { weight: 2.6, fillOpacity: 0.38, dashArray: null },   // ★ AI가 새로 포착
-  sustained: { weight: 1.0, fillOpacity: 0.10, dashArray: null },   // 이미 높음 — 은은하게
+  sustained: { weight: 1.6, fillOpacity: 0.22, dashArray: null },   // 고위험
   watch:     { weight: 0.9, fillOpacity: 0.08, dashArray: null },
   normal:    { weight: 0.6, fillOpacity: 0.05, dashArray: '4 3' },
 };
 const NO_DATA_STYLE = { weight: 0.7, fillOpacity: 0.04, dashArray: '3 4' };
 
+// 미지 등급(구 캐시의 'onset' 등)은 normalizeRisk가 최고 등급으로 흡수한다.
+// 그냥 두면 회색('예측 없음')이 되어 위험이 안전해 보이는 잘못된 폴백이 된다.
 function riskStyle(risk) {
-  const col = risk && RISK[risk] ? RISK[risk].color : NO_DATA_COLOR;
-  const s   = (risk && RISK_STYLE[risk]) || NO_DATA_STYLE;
+  const r   = normalizeRisk(risk);
+  const col = r ? RISK[r].color : NO_DATA_COLOR;
+  const s   = (r && RISK_STYLE[r]) || NO_DATA_STYLE;
   return { color: col, fillColor: col, ...s };
 }
 
 function scoreColor(score, risk) {
-  if (risk && RISK[risk]) return RISK[risk].color;
+  const r = normalizeRisk(risk);
+  if (r) return RISK[r].color;
   if (score == null) return NO_DATA_COLOR;
   return '#00FF88';
 }
 function scoreSev(score, risk) {
-  if (risk && RISK[risk]) return RISK[risk].label;
+  const r = normalizeRisk(risk);
+  if (r) return RISK[r].label;
   return score == null ? 'NO DATA' : '정상';
 }
 
@@ -793,11 +800,16 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
     chipScrollRef.current?.scrollBy({ left: dir * 160, behavior: 'smooth' });
   }, []);
 
-  // 펄스 마커 = '급등 경보'(onset)만. AI가 새로 잡아낸 위험만 눈에 띄게 한다.
-  const anomalyFarms = useMemo(() => farms.filter(f => f.risk === 'onset'), [farms]);
+  // 🔴 2026-07-17: 펄스 마커 비활성화.
+  //   기존엔 onset(Δwarn≥0.15) 어장만 펄스로 강조했다("AI가 새로 잡아낸 위험"). 그런데 실측에서
+  //   Δwarn의 onset 예측 AUC가 0.385(무작위 이하)로 나와 그 강조에 근거가 없음이 확인됐다.
+  //   대체 후보였던 warn 최고등급(sustained)은 모델 출력의 이진 포화 때문에 상시 ~29%(≈346어장)라
+  //   "희소한 강조"로 쓸 수 없다(펄스가 지도를 뒤덮음). 근거 없는 강조를 하느니 끈다.
+  //   → 위험도는 폴리곤 색(riskStyle)으로만 표현한다. 재학습으로 확률 포화가 풀리면 재검토.
+  const anomalyFarms = useMemo(() => [], []);
   const riskCount = useMemo(() => {
-    const c = { onset: 0, sustained: 0, watch: 0, normal: 0 };
-    farms.forEach(f => { if (f.risk) c[f.risk]++; });
+    const c = { sustained: 0, watch: 0, normal: 0 };
+    farms.forEach(f => { if (f.risk && c[f.risk] !== undefined) c[f.risk]++; });
     return c;
   }, [farms]);
   const hasSelection = !!selectedSite;
@@ -868,10 +880,9 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
             const entry = preds?.farms[String(p.gid)];
             const oog   = preds?.outOfGrid.has(String(p.gid));
 
+            // 2026-07-17: '전일 대비 급등(Δwarn)' 표시 제거 — 무작위 이하 지표였다(AUC 0.385).
             const detail = entry
               ? `${sev} · 7일내 발생확률 ${(entry.warn * 100).toFixed(0)}%`
-                + (entry.onset != null && entry.onset >= 0.15
-                    ? ` <span style="color:#FF4D4F">(전일 대비 +${(entry.onset * 100).toFixed(0)}%p 급등)</span>` : '')
                 + (oog ? ' <span style="color:#FFD700">(격자밖·신뢰도↓)</span>' : '')
               : '예측 데이터 없음';
 
@@ -890,7 +901,9 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
           }}
         />
 
-        {/* 이상 마커 (score > 0.6 — pulse 아이콘) */}
+        {/* 이상 마커(pulse) — 🔴 2026-07-17 현재 **비활성**(anomalyFarms가 항상 빈 배열이라 아무것도 안 뜬다).
+            Δwarn 기반 '급등 경보'가 무작위 이하로 확인돼 제거했고, 대체 후보(고위험)는 상시 ~29%라
+            강조로 쓸 수 없다. 확률 포화가 재학습으로 풀리면 복구 검토. 위 anomalyFarms 주석 참조. */}
         {anomalyFarms.map(farm => {
           const col        = scoreColor(farm.score, farm.risk);
           const isSelected = selectedSite?.id === farm.id;
@@ -1103,24 +1116,25 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
       }}>
         <RealSensorOverlay site={selectedSite} />
 
-        {/* 위험 등급 범례 — onset(전이) 기반 */}
+        {/* 위험 등급 범례 — warn(7일내 발생확률) 절대값 기준. onset 등급은 2026-07-17 제거됨 */}
         <div style={{
           background: 'rgba(5,11,24,0.82)', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 5, padding: '8px 12px', backdropFilter: 'blur(8px)',
         }}>
           <div style={{ fontSize: 9, color: 'rgba(0,229,255,0.6)', fontFamily: 'Courier New', letterSpacing: 1, marginBottom: 6 }}>
-            위험 등급 (전일 대비 전이 기준)
+            위험 등급 (7일내 발생확률)
           </div>
-          {['onset', 'sustained', 'watch', 'normal'].map(k => (
+          {['sustained', 'watch', 'normal'].map(k => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: RISK[k].color, boxShadow: `0 0 5px ${RISK[k].color}`, flexShrink: 0 }}/>
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: 700, minWidth: 62 }}>{RISK[k].label}</span>
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount[k]}</span>
             </div>
           ))}
+          {/* 임계값은 백엔드 risk_thresholds(SSOT)에서 받아 표시 — 하드코딩하면 백엔드와 갈라진다 */}
           <div style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.38)', marginTop: 5, lineHeight: 1.4, maxWidth: 190 }}>
-            🔴 급등 = AI가 새로 포착한 위험 전이<br/>
-            🟠 지속 = 이미 높은 상태(관성)
+            🔴 고위험 = 발생확률 {((preds?.riskThresholds?.sustained ?? 0.5) * 100).toFixed(0)}% 이상<br/>
+            🟡 주의 = {((preds?.riskThresholds?.watch ?? 0.2) * 100).toFixed(0)}% 이상
           </div>
         </div>
 
