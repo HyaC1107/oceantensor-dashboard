@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchRealSensorByLatLon, fetchRealSensorHistoryByLatLon, provenanceLabel } from '../../data/realSensor';
+import { STAGE_LABEL } from '../../data/v13Predictions';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -82,8 +83,10 @@ function Sparkline({ color, series }) {
   );
 }
 
+// stage 라벨 SSOT = data/v13Predictions.js STAGE_LABEL (지도·XAI와 공유).
+// 2026-07-17: 여기 따로 정의돼 있던 V7_LABELS를 제거하고 공용 상수로 통일했다(라벨 3중 불일치 해소).
 const V7_COLORS = { 0: '#00FF88', 1: '#FFD700', 2: '#FF8A3D', 3: '#FF4D4F' };
-const V7_LABELS = { 0: '정상', 1: '초기', 2: '경계', 3: '심각' };
+const V7_LABELS = STAGE_LABEL;
 
 function SectionLabel({ children }) {
   return (
