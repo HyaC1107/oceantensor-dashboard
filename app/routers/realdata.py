@@ -74,6 +74,31 @@ ORDER BY o.obsr_de DESC
 LIMIT 1
 """)
 
+# 최근접 KOEM 관측소의 관측 이력 (최근 n회, 표층) — 상세카드 스파크라인용.
+# ⚠️ KOEM 은 분기 관측이라 n=8 이 약 2년 치다. 프론트는 '최근 n일'처럼 보이지 않게 관측일을 함께 표기할 것.
+_KOEM_HIST_SQL = text("""
+WITH st AS (
+    SELECT stnpnt_code, stnpnt_korean_nm,
+           ST_Distance(geom::geography,
+                       ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography) / 1000.0 AS km
+    FROM koem_station
+    WHERE geom IS NOT NULL
+    ORDER BY geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)
+    LIMIT 1
+)
+SELECT st.stnpnt_korean_nm AS station, st.km,
+       o.obsr_de AS observed_on,
+       o.wtrtmp_sfclyr AS water_temp,
+       o.salnt_sfclyr  AS salinity,
+       o.doxy_sfclyr   AS dissolved_oxygen,
+       o.fltng_mttr_sfclyr AS suspended_solids
+FROM st
+JOIN koem_observation o ON o.stnpnt_code = st.stnpnt_code
+WHERE o.wtrtmp_sfclyr IS NOT NULL
+ORDER BY o.obsr_de DESC
+LIMIT :n
+""")
+
 # 최근접 KMA 관측소의 최신 강수 (24h 누적)
 _KMA_SQL = text("""
 WITH st AS (
@@ -167,6 +192,39 @@ async def _fetch_real(db: AsyncSession, lat: float, lon: float) -> Optional[dict
 OUT_OF_GRID_REGIONS = {"화성", "안산", "옹진"}
 
 
+# ⚠️ /sensor/{farm_id} 보다 먼저 등록해야 한다 — 뒤에 두면 farm_id="history" 로 매칭돼 404.
+@router.get("/sensor/history")
+async def real_sensor_history(
+    lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180),
+    n: int = Query(8, ge=2, le=24),
+    db: AsyncSession = Depends(get_db),
+):
+    """최근접 KOEM 관측소의 관측 이력(최근 n회) — 스파크라인용. 분기 관측이라 n=8 ≈ 2년."""
+    try:
+        rows = (await db.execute(_KOEM_HIST_SQL, {"lat": lat, "lon": lon, "n": n})).mappings().all()
+    except Exception as e:
+        raise HTTPException(503, f"실데이터 DB 조회 실패: {type(e).__name__}")
+    if not rows:
+        raise HTTPException(404, "인근 관측 이력 없음")
+    rows = list(reversed(rows))  # 과거 → 최신 (차트 순서)
+    return {
+        "lat": lat, "lon": lon,
+        "station": rows[0]["station"],
+        "distance_km": round(_f(rows[0]["km"]) or 0.0, 1),
+        "source": "KOEM 해양환경측정망 (분기·반기 정기관측)",
+        "series": [
+            {
+                "date": str(r["observed_on"]),
+                "water_temp":       _f(r["water_temp"]),
+                "dissolved_oxygen": _f(r["dissolved_oxygen"]),
+                "salinity":         _f(r["salinity"]),
+                "turbidity":        _f(r["suspended_solids"]),  # 부유물질(SS) 대용 — /sensor 와 동일 매핑
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/sensor/{farm_id}")
 async def real_sensor(farm_id: str, db: AsyncSession = Depends(get_db)):
     """어장(F01~F79) 최근접 관측소의 실측 센서값."""
@@ -189,7 +247,7 @@ async def real_sensor(farm_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/sensor")
 async def real_sensor_by_latlon(
-    lat: float = Query(...), lon: float = Query(...),
+    lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180),
     db: AsyncSession = Depends(get_db),
 ):
     """임의 좌표(지도 폴리곤 클릭 등) 최근접 관측소의 실측 센서값."""

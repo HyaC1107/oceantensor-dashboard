@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchRealSensorByLatLon, provenanceLabel } from '../../data/realSensor';
+import { fetchRealSensorByLatLon, fetchRealSensorHistoryByLatLon, provenanceLabel } from '../../data/realSensor';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -55,14 +55,17 @@ const SENSORS = {
   N4: { temp: 18.9, do: 8.4, sal: 32.0, turb:  1.9, din: 156.7, dip: 31.2, np: 27.6 },
 };
 
-function Sparkline({ color, trend = 'up' }) {
-  const base = trend === 'up'
-    ? [30, 28, 32, 27, 35, 33, 38, 40]
-    : [40, 38, 35, 37, 32, 30, 28, 26];
-  const noise = base.map(v => v + (Math.random() - 0.5) * 4);
-  const min = Math.min(...noise), max = Math.max(...noise);
-  const norm = noise.map(v => 36 - ((v - min) / (max - min + 0.01)) * 28);
-  const path = norm.map((y, x) => `${x === 0 ? 'M' : 'L'}${x * 10} ${y}`).join(' ');
+// 실측 이력 스파크라인 — series는 실제 관측값 배열(과거→최신). 2점 미만이면 그리지 않는다(가짜 곡선 금지).
+function Sparkline({ color, series }) {
+  const vals = (series ?? []).filter(Number.isFinite);
+  if (vals.length < 2) return null;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  // 변화 없는 시계열은 최하단이 아니라 중앙에 — 아니면 '최저치'처럼 오독됨
+  const norm = max - min < 1e-9
+    ? vals.map(() => 22)
+    : vals.map(v => 36 - ((v - min) / (max - min)) * 28);
+  const step = 70 / (vals.length - 1);
+  const path = norm.map((y, i) => `${i === 0 ? 'M' : 'L'}${i * step} ${y}`).join(' ');
   return (
     <svg width={70} height={28} viewBox="0 0 70 40" style={{ opacity: 0.75 }}>
       <defs>
@@ -104,15 +107,24 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
 
   // 실측(Bronze) 센서 — 최근접 관측소. 실패 시 기존 mock 폴백.
   const [realSensor, setRealSensor] = useState(null);
+  // 관측 이력(분기 n회) — 스파크라인용. 없으면 스파크라인 숨김.
+  const [sensorHist, setSensorHist] = useState(null);
   useEffect(() => {
     let alive = true;
     setRealSensor(null);
+    setSensorHist(null);
     (async () => {
-      const r = await fetchRealSensorByLatLon(site.lat, site.lon);
-      if (alive) setRealSensor(r);
+      const [r, h] = await Promise.all([
+        fetchRealSensorByLatLon(site.lat, site.lon),
+        fetchRealSensorHistoryByLatLon(site.lat, site.lon),
+      ]);
+      if (alive) { setRealSensor(r); setSensorHist(h); }
     })();
     return () => { alive = false; };
   }, [site.id]);
+
+  // 더미 폴백 어장은 스파크라인도 숨긴다 — 더미 숫자 옆에 실측 곡선을 두면 출처가 섞여 오도됨
+  const histSeries = (key) => (realSensor && sensorHist) ? sensorHist.series.map(p => p[key]) : null;
 
   const mock = SENSORS[site.id] ?? { temp: 22.0, do: 6.5, sal: 32.5, turb: 5.0, din: 100.0, dip: 20.0, np: 26.0 };
   // HUD 카드의 DIN/DIP 임계는 μg/L 체계 → 실측도 raw_ugl(μg/L)을 쓴다 (μmol/L 혼용 금지)
@@ -380,7 +392,7 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
         }}>
           {realSensor
             ? `● 실측 — ${provenanceLabel(realSensor.provenance)}`
-            : '● 더미 데이터 (실측 미연결)'}
+            : '● 더미 데이터 (실측 미연결) — 아래 센서값 전체'}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
           {[
@@ -411,12 +423,12 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
         </div>
 
         {/* ④ 수온 / DO (황백화 직접 연관) */}
-        <SectionLabel>수온 · 용존산소</SectionLabel>
+        <SectionLabel>수온 · 용존산소{!realSensor && ' (더미)'}</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
           {[
-            { label: '수온',  val: `${s.temp}`, unit: '℃',    col: '#FF8A3D', trend: 'up'   },
-            { label: 'DO',   val: `${s.do}`,   unit: 'mg/L', col: '#00E5FF', trend: 'down' },
-          ].map(({ label, val, unit, col: c, trend }) => (
+            { label: '수온',  val: `${s.temp}`, unit: '℃',    col: '#FF8A3D', hk: 'water_temp'       },
+            { label: 'DO',   val: `${s.do}`,   unit: 'mg/L', col: '#00E5FF', hk: 'dissolved_oxygen' },
+          ].map(({ label, val, unit, col: c, hk }) => (
             <div key={label} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               background: 'rgba(255,255,255,0.02)', borderRadius: 6, padding: '8px 12px',
@@ -428,18 +440,18 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
                   {val} <span style={{ fontSize: 12, opacity: 0.55 }}>{unit}</span>
                 </div>
               </div>
-              <Sparkline color={c} trend={trend} />
+              <Sparkline color={c} series={histSeries(hk)} />
             </div>
           ))}
         </div>
 
         {/* ⑤ 일반 환경 지표 (스크롤 내려서 확인) */}
-        <SectionLabel>환경 지표</SectionLabel>
+        <SectionLabel>환경 지표{!realSensor && ' (더미)'}</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 4 }}>
           {[
-            { label: '염분', val: `${s.sal}`,  unit: 'PSU', col: '#8B5CF6', trend: 'up' },
-            { label: '탁도', val: `${s.turb}`, unit: 'NTU', col: '#FFD700', trend: isAnomaly ? 'up' : 'down' },
-          ].map(({ label, val, unit, col: c, trend }) => (
+            { label: '염분', val: `${s.sal}`,  unit: 'PSU', col: '#8B5CF6', hk: 'salinity'  },
+            { label: '탁도', val: `${s.turb}`, unit: 'NTU', col: '#FFD700', hk: 'turbidity' },
+          ].map(({ label, val, unit, col: c, hk }) => (
             <div key={label} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               background: 'rgba(255,255,255,0.02)', borderRadius: 6, padding: '8px 12px',
@@ -451,10 +463,19 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
                   {val} <span style={{ fontSize: 12, opacity: 0.55 }}>{unit}</span>
                 </div>
               </div>
-              <Sparkline color={c} trend={trend} />
+              <Sparkline color={c} series={histSeries(hk)} />
             </div>
           ))}
         </div>
+
+        {/* 스파크라인 출처 — KOEM은 분기·반기 관측이라 '최근 며칠'처럼 보이면 오도.
+            횟수 대신 기간 표기(지표별 결측으로 점 수가 다를 수 있음) + 관측소 거리 병기 */}
+        {realSensor && sensorHist && (
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)', fontFamily: 'Courier New', marginBottom: 4, letterSpacing: 0.5 }}>
+            그래프: {sensorHist.station} ({sensorHist.distance_km}km) 실측
+            {' '}{sensorHist.series[0].date.slice(0, 7)} ~ {sensorHist.series[sensorHist.series.length - 1].date.slice(0, 7)} (정기 관측)
+          </div>
+        )}
 
         {/* 스크롤 여백 */}
         <div style={{ height: 8 }} />

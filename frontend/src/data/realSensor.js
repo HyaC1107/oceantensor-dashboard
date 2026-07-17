@@ -58,6 +58,26 @@ export function fetchRealSensorByLatLon(lat, lon) {
   return _get(`/real/sensor?lat=${lat}&lon=${lon}`);
 }
 
+/**
+ * 최근접 관측소 관측 이력(최근 n회) — 상세카드 스파크라인용.
+ * ⚠️ KOEM 분기 관측이라 n=8 ≈ 약 2년. 화면에 관측 기간을 반드시 병기할 것.
+ * 실패/이력 2회 미만이면 null → 호출부는 스파크라인을 숨긴다 (가짜 곡선 금지).
+ */
+export async function fetchRealSensorHistoryByLatLon(lat, lon, n = 8) {
+  const url = `/real/sensor/history?lat=${lat}&lon=${lon}&n=${n}`;
+  if (_cache.has(url)) return _cache.get(url);
+  let out = null;
+  try {
+    const r = await fetch(`${API_BASE}${url}`);
+    if (r.ok) {
+      const d = await r.json();
+      if ((d?.series?.length ?? 0) >= 2) out = d;
+    }
+  } catch { /* 폴백: null */ }
+  _cache.set(url, out);
+  return out;
+}
+
 /** 출처 한 줄 요약 — 화면 배지용 */
 export function provenanceLabel(p) {
   if (!p) return '';
