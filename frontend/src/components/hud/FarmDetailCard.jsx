@@ -509,7 +509,10 @@ export default function FarmDetailCard({ site, onClose, maxH, onDragHandle, onGo
         display: 'flex', gap: 8,
       }}>
         <button
-          onClick={() => onGoXai?.()}
+          // 🔴 2026-07-17: 선택한 어장 id를 반드시 넘긴다. 이전엔 인자 없이 호출해 XAI가
+          // 등록부 첫 어장(gid 70018 보령 삽시도리)을 보여줬다 — 지도에서 '주의'를 클릭해도
+          // XAI는 늘 그 어장의 '정상'을 표시(PM 지적 "색은 주의인데 XAI 정상"의 진짜 원인).
+          onClick={() => onGoXai?.(site.id)}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             flex: 1, padding: '10px 0', borderRadius: 6, fontSize: 11, fontWeight: 700,

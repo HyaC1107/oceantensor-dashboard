@@ -28,9 +28,18 @@ const BAR_COLORS = ['#FF4D4F', '#FF8A3D', '#FFD700', '#00E5FF', '#8B5CF6', '#00F
 // 등급 라벨 SSOT = data/v13Predictions.js (지도·상세카드와 공유).
 // 구 severityLabel(WBI 기준 정상/주의/경고/위험)은 2026-07-17 제거 — 지도와 라벨 체계가 갈렸던 원인.
 
-export default function XaiAnalysisTab() {
-  // 기본 선택 = 등록부 첫 어장. (구: 더미 위험도로 1194개를 정렬 — 가짜 점수 기준이라 무의미했음)
-  const [farmId, setFarmId] = useState(ALL_FARMS[0].id);
+export default function XaiAnalysisTab({ initialFarmId = null }) {
+  // 🔴 2026-07-17: 지도에서 넘어온 어장을 우선 선택한다.
+  //   이전엔 무조건 ALL_FARMS[0](gid 70018 보령 삽시도리)로 시작해서,
+  //   지도에서 '주의' 어장을 클릭하고 "XAI 분석 →"을 눌러도 **전혀 다른 어장의 '정상'**이 떴다.
+  //   (PM이 지적한 "지도 색은 주의인데 XAI는 정상"의 진짜 원인 — 값이 아니라 대상이 달랐다)
+  const [farmId, setFarmId] = useState(
+    () => (initialFarmId && getFarm(initialFarmId) ? String(initialFarmId) : ALL_FARMS[0].id)
+  );
+  // 탭이 유지된 채 지도에서 다른 어장으로 다시 들어오는 경우도 반영
+  useEffect(() => {
+    if (initialFarmId && getFarm(initialFarmId)) setFarmId(String(initialFarmId));
+  }, [initialFarmId]);
   const farm = useMemo(() => getFarm(farmId), [farmId]);
   const dummy = useMemo(() => farmDummy(farm), [farm]);
 

@@ -38,6 +38,7 @@ export default function App() {
   const hash = useHash();
   const { data, status, history } = useWebSocket(WS_URL);
   const [activeTab, setActiveTab] = useState('hud');
+  const [xaiFarmId, setXaiFarmId] = useState(null);   // 지도 → XAI 어장 승계(2026-07-17)
 
   if (hash === '#admin') return <AdminPage />;
 
@@ -65,14 +66,16 @@ export default function App() {
         {/* HUD 관제 탭 — 풀스크린 SF 관제센터 */}
         {activeTab === 'hud' && (
           <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
-            <HudDashboard onGoXai={() => setActiveTab('xai')} />
+            {/* 지도에서 선택한 어장을 XAI로 승계한다(2026-07-17).
+                이전엔 id를 안 넘겨 XAI가 늘 등록부 첫 어장을 보여줬다. */}
+            <HudDashboard onGoXai={(farmId) => { setXaiFarmId(farmId ?? null); setActiveTab('xai'); }} />
           </div>
         )}
 
         {/* XAI 분석 탭 — 어장 선택형 풀사이즈 심층 분석 */}
         {activeTab === 'xai' && (
           <div style={styles.padded}>
-            <XaiAnalysisTab />
+            <XaiAnalysisTab initialFarmId={xaiFarmId} />
           </div>
         )}
 
