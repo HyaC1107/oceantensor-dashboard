@@ -68,6 +68,61 @@ def _load() -> tuple[str, dict]:
     return "stmmt-v13", base
 
 
+# ── 예측 범위(커버리지) 마스크 ──────────────────────────────────────────────
+# 🔴 2026-07-19: cube_v7 격자가 실질적으로 동경 126.75° 부근에서 끝난다는 사실 확인.
+#   그 동쪽(고흥 187·장흥 49·여수 26·완도 104 등)과 격자 북단(서천 28)은 모델 입력이
+#   비어 있어 회귀 헤드(adi7)가 **전 기간 정확히 0**으로 나온다. warn도 노이즈 수준.
+#   → 2025-11 서천 대규모 황백화(3,156ha) 때도 이 어장들은 '정상(초록)'으로 표시됐다.
+#     "데이터 없음"이 "안전함"으로 보이는 역-fail-safe (2026-07-13 biz-ttori 교훈과 동일 패턴).
+#
+# 판정 기준(팩에서 기계적으로 산출 — 수동 목록 관리 금지):
+#   ① 전 기간 max(adi7) == 0  → 입력 부재(회귀 헤드 사망). warn<0.01 기준의 엄격한 상위집합이며
+#     사건을 놓친 서천 28개 전부를 포착함을 실측 검증(2026-07-19, 모순 0건).
+#   ② meta.out_of_grid_farms  → 격자 밖. 경계 픽셀 값으로 클램프되어 수백 km 밖 신호를
+#     차용한다(부산 강서 등 — 죽은 것보다 나쁨).
+#   ①∪② = 예측 범위 밖. risk 판정에서 제외하고 "예측 범위 밖"으로 정직하게 표시한다.
+NO_COVERAGE_LABEL = "예측 범위 밖"
+COVERAGE_NOTE = (
+    "cube_v7 격자 실커버리지 밖 어장 — 모델 입력이 없어 예측이 무의미함. "
+    "근본 해결은 격자 동쪽 확장 + 재학습(진행 검토 중)"
+)
+
+
+@lru_cache(maxsize=1)
+def _no_coverage() -> frozenset:
+    """예측 범위 밖 gid 집합. `_load`처럼 팩당 1회 계산(재시작 시 함께 무효화).
+
+    ⚠️ 팩 핫리로드/cache_clear 엔드포인트를 도입한다면 `_load.cache_clear()`와 함께
+       반드시 `_no_coverage.cache_clear()`(그리고 `_build_sequence`)도 호출할 것 —
+       빠뜨리면 낡은 마스크가 새 팩에 적용된다(리뷰 지적).
+    """
+    model_name, data = _load()
+    if not data or model_name != "stmmt-v13":
+        return frozenset()
+    peak = {}   # gid → 전 기간 max(adi7). ⚠️ 0.0도 반드시 기록해야 함(전부 0인 어장이 판정 대상)
+    for day in data.get("predictions", {}).values():
+        for gid, v in day.items():
+            if not isinstance(v, dict):
+                continue
+            a = max(v["adi7"]) if v.get("adi7") else 0.0
+            if gid not in peak or a > peak[gid]:
+                peak[gid] = a
+    masked = {g for g, mx in peak.items() if mx <= 0.0}
+    masked |= {str(g) for g in data["meta"].get("out_of_grid_farms", [])}
+    # 팩 이상 가드(리뷰 지적): 미래 팩에서 adi7 필드가 빠지거나 키명이 바뀌면 전 어장이
+    # "조용히" 마스킹된다(지도 전체 회색 = 경보 사일런싱). 90% 초과는 커버리지가 아니라
+    # 팩 스키마 이상으로 본다. 그래도 마스킹은 유지한다 — 전면 회색은 눈에 띄는 고장이라
+    # 즉시 조치되지만, 마스킹을 풀면 "가짜 정상"이 소리 없이 부활하기 때문(더 나쁜 방향).
+    if peak and len(masked) / max(len(peak), 1) > 0.9:
+        import sys
+        print(
+            f"[v7:_no_coverage] ⚠️ 마스킹 비율 {len(masked)}/{len(peak)} > 90% — "
+            "팩 스키마 이상(adi7 소실?) 의심. 팩 재생성 스크립트/필드명을 점검할 것.",
+            file=sys.stderr,
+        )
+    return frozenset(masked)
+
+
 # ── 위험 등급: warn 절대값 기반 ────────────────────────────────────────────
 # 🔴 2026-07-17: Δwarn(전일 대비 급등) 기반 "급등 경보" 판정을 **제거**했다.
 #
@@ -105,10 +160,12 @@ def _risk_class(warn: float) -> str:
     return "normal"
 
 
-def _farm_entry(raw, prev=None) -> dict:
+def _farm_entry(raw, prev=None, no_cov: bool = False) -> dict:
     """구 팩(int stage) / 신 팩(dict) → 공통 스키마 + warn 절대값 기반 위험등급.
 
     `onset`(Δwarn)은 참고 지표로 응답에 실어주되 **등급 판정에는 쓰지 않는다**(AUC 0.385).
+    no_cov=True(예측 범위 밖)면 risk를 판정하지 않는다 — 빈 입력의 warn≈0을
+    '정상'으로 둔갑시키지 않기 위해서다. 원시값은 투명성 위해 그대로 싣는다.
     """
     if not isinstance(raw, dict):
         return {"stage": raw, "stage_label": STAGE_LABELS.get(raw, "??")}
@@ -117,6 +174,13 @@ def _farm_entry(raw, prev=None) -> dict:
     for k in ("adi7", "warn", "severe"):
         if k in raw:
             entry[k] = raw[k]
+
+    if no_cov:
+        entry.update({
+            "risk": None, "risk_label": NO_COVERAGE_LABEL, "no_coverage": True,
+            "warn_prev": None, "onset": None,
+        })
+        return entry
 
     warn = float(raw.get("warn", 0.0))
     onset = None
@@ -164,12 +228,20 @@ def get_v7_by_date(date: str = Query(..., description="YYYY-MM-DD")):
     pdate = _prev_date(preds, date)
     prev_day = preds.get(pdate, {}) if pdate else {}
 
+    no_cov = _no_coverage()
     farms = {} if not in_season else {
-        fid: _farm_entry(raw, prev_day.get(fid)) for fid, raw in day.items()
+        fid: _farm_entry(raw, prev_day.get(fid), no_cov=fid in no_cov)
+        for fid, raw in day.items()
     }
     counts: dict[str, int] = {}
     for e in farms.values():
-        counts[e["risk"]] = counts.get(e["risk"], 0) + 1
+        # no_coverage 플래그로 판정한다(리뷰 지적) — 구 v7 폴백 팩(int stage)은 risk 키가
+        # 아예 없는데, risk 부재를 "범위 밖"으로 세면 의미가 다른 것을 한 통에 섞게 된다.
+        if e.get("no_coverage"):
+            key = "no_coverage"
+        else:
+            key = e.get("risk") or "unknown"
+        counts[key] = counts.get(key, 0) + 1
 
     return {
         "date": date,
@@ -184,6 +256,9 @@ def get_v7_by_date(date: str = Query(..., description="YYYY-MM-DD")):
         "risk_thresholds": {"sustained": SUSTAINED_TH, "watch": WATCH_TH},
         "risk_counts": counts,
         "farms": farms,
+        # 예측 범위 밖(입력 부재 + 격자 밖) — 지도는 이 어장들을 회색으로 그린다.
+        "no_coverage_farms": sorted(no_cov),
+        "coverage_note": COVERAGE_NOTE,
         "out_of_grid_farms": data["meta"].get("out_of_grid_farms", []),
     }
 
@@ -238,12 +313,14 @@ def _build_sequence() -> Optional[dict]:
     codes: dict[str, list[str]] = {g: [] for g in gids}
 
     # 등급이 warn 절대값만으로 결정되므로 전일 프레임 조회(_prev_date)가 불필요해졌다.
+    # 예측 범위 밖 어장은 전 프레임 '.'(예측 없음) — 타임랩스에서도 초록으로 칠하지 않는다.
+    no_cov = _no_coverage()
     for d in dates:
         frame = preds[d]
         for g in gids:
             raw = frame.get(g)
-            if not isinstance(raw, dict):
-                codes[g].append(".")          # 그날 그 어장 예측 없음
+            if not isinstance(raw, dict) or g in no_cov:
+                codes[g].append(".")          # 그날 그 어장 예측 없음 / 범위 밖
                 continue
             codes[g].append(CODE[_risk_class(float(raw.get("warn", 0.0)))])
 
@@ -252,6 +329,7 @@ def _build_sequence() -> Optional[dict]:
         "codes": {g: "".join(v) for g, v in codes.items()},
         # legend는 **현재 계약만** 선언한다. 구 "3"(onset)은 2026-07-17 폐기 후 생성되지 않으므로 뺐다.
         "code_legend": {"2": "sustained", "1": "watch", "0": "normal", ".": "none"},
+        "no_coverage_farms": sorted(no_cov),
         "out_of_grid_farms": data["meta"].get("out_of_grid_farms", []),
     }
 
@@ -282,6 +360,7 @@ def get_v7_farm_series(
     if not data:
         raise HTTPException(503, "사전 계산 예측 데이터 없음")
     preds = data.get("predictions", {})
+    no_cov = farm_id in _no_coverage()
     series = []
     for date in sorted(preds.keys()):
         if start and date < start:
@@ -291,12 +370,14 @@ def get_v7_farm_series(
         raw = preds[date].get(farm_id)
         if raw is None:
             continue
-        series.append({"date": date, **_farm_entry(raw)})
+        series.append({"date": date, **_farm_entry(raw, no_cov=no_cov)})
     if not series:
         raise HTTPException(404, f"어장 없음 또는 해당 기간 데이터 없음: {farm_id}")
     return {
         "farm_id": farm_id,
         "model": model_name,
+        "no_coverage": no_cov,
+        "coverage_note": COVERAGE_NOTE if no_cov else None,
         "date_range": [series[0]["date"], series[-1]["date"]],
         "series": series,
     }

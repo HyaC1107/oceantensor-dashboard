@@ -773,6 +773,8 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         warn:    preds?.farms[String(p.gid)]?.warn ?? null,
         adi7:    preds?.farms[String(p.gid)]?.adi7 ?? null,
         outOfGrid: preds?.outOfGrid.has(String(p.gid)) ?? false,
+        // 예측 범위 밖(cube 실커버리지 밖 — 입력 부재/격자 밖). 백엔드 no_coverage SSOT.
+        noCoverage: preds?.farms[String(p.gid)]?.no_coverage ?? false,
         risk,
         severity: scoreSev(score, risk),
         polygon: f.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]),
@@ -812,8 +814,11 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
   //   → 위험도는 폴리곤 색(riskStyle)으로만 표현한다. 재학습으로 확률 포화가 풀리면 재검토.
   const anomalyFarms = useMemo(() => [], []);
   const riskCount = useMemo(() => {
-    const c = { sustained: 0, watch: 0, normal: 0 };
-    farms.forEach(f => { if (f.risk && c[f.risk] !== undefined) c[f.risk]++; });
+    const c = { sustained: 0, watch: 0, normal: 0, noCoverage: 0 };
+    farms.forEach(f => {
+      if (f.noCoverage) c.noCoverage++;
+      else if (f.risk && c[f.risk] !== undefined) c[f.risk]++;
+    });
     return c;
   }, [farms]);
   const hasSelection = !!selectedSite;
@@ -885,8 +890,14 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
             const oog   = preds?.outOfGrid.has(String(p.gid));
 
             // 2026-07-17: '전일 대비 급등(Δwarn)' 표시 제거 — 무작위 이하 지표였다(AUC 0.385).
-            const detail = entry
+            // 2026-07-19: 예측 범위 밖(no_coverage) 어장은 warn%를 아예 보여주지 않는다 —
+            //   빈 입력의 0.01%가 "발생확률 0%(안전)"처럼 읽히는 것 자체가 오정보다.
+            const detail = entry?.no_coverage
+              ? '<span style="color:#9AA8BF">모델 예측 범위 밖 — 입력 데이터 없음</span>'
+              : entry
               ? `${sev} · 7일내 발생확률 ${(entry.warn * 100).toFixed(0)}%`
+                // oog ⊂ no_coverage 라 평상시엔 도달 불가 — 백엔드 마스킹이 꺼진(구 팩 폴백 등)
+                // 상황에서만 살아나는 최후 방어선으로 남겨둔다(리뷰 확인).
                 + (oog ? ' <span style="color:#FFD700">(격자밖·신뢰도↓)</span>' : '')
               : '예측 데이터 없음';
 
@@ -1135,13 +1146,22 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount[k]}</span>
             </div>
           ))}
+          {/* 2026-07-19: 예측 범위 밖 — cube 실커버리지 밖 어장을 '정상(초록)'으로 팔지 않는다 */}
+          {riskCount.noCoverage > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: NO_DATA_COLOR, flexShrink: 0 }}/>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 700, minWidth: 62 }}>범위 밖</span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount.noCoverage}</span>
+            </div>
+          )}
           {/* 임계값은 백엔드 risk_thresholds(SSOT)에서 받아 표시 — 하드코딩하면 백엔드와 갈라진다.
               ⚠️ 이 색은 warn(발생확률) 축이다. 상세카드의 '예측 강도(정상/초기/경계/심각)'는
                  adi7 축이라 등급 수가 다르다 — 둘을 같은 4단계로 합치지 말 것(축이 다름). */}
           <div style={{ fontSize: 8.5, color: 'rgba(255,255,255,0.38)', marginTop: 5, lineHeight: 1.4, maxWidth: 190 }}>
             🔴 고위험 = 발생확률 {((preds?.riskThresholds?.sustained ?? 0.5) * 100).toFixed(0)}% 이상<br/>
             🟡 주의 = {((preds?.riskThresholds?.watch ?? 0.2) * 100).toFixed(0)}% 이상<br/>
-            <span style={{ opacity: 0.75 }}>※ 색 = 7일내 발생확률. 강도(ADI 4단계)는 어장 선택 시 표시</span>
+            <span style={{ opacity: 0.75 }}>※ 색 = 7일내 발생확률. 강도(ADI 4단계)는 어장 선택 시 표시</span><br/>
+            <span style={{ opacity: 0.75 }}>⚪ 범위 밖 = 모델 데이터 커버리지 밖 — 예측 제공 불가(안전 의미 아님)</span>
           </div>
         </div>
 

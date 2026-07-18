@@ -187,9 +187,14 @@ export default function XaiAnalysisTab({ initialFarmId = null }) {
           ) : (
             <div style={{ ...st.wbiBadge, borderColor: 'rgba(255,255,255,0.2)' }}>
               <span style={st.wbiLabel}>STMMT v13 예측</span>
-              <span style={{ ...st.wbiVal, color: 'rgba(190,205,225,0.8)', fontSize: 13 }}>예측 없음</span>
+              <span style={{ ...st.wbiVal, color: 'rgba(190,205,225,0.8)', fontSize: 13 }}>
+                {v13?.no_coverage ? '예측 범위 밖' : '예측 없음'}
+              </span>
               <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)', maxWidth: 210, lineHeight: 1.3 }}>
-                {seasonNote ?? '해당 어장 예측 없음 (격자밖 등)'}
+                {/* 2026-07-19: 범위 밖 = cube 실커버리지 밖(입력 부재) — '안전'이 아니라 '모름' */}
+                {v13?.no_coverage
+                  ? '이 어장은 모델 데이터 커버리지 밖입니다 — 예측 불가(안전 의미 아님)'
+                  : (seasonNote ?? '해당 어장 예측 없음 (격자밖 등)')}
               </span>
             </div>
           )}
