@@ -30,12 +30,12 @@ function useCountUp(target, duration = 850, delay = 180) {
 //   이제 site.risk(지도가 칠하는 그 등급)를 직접 받는다.
 function riskColorOf(site) {
   const r = normalizeRisk(site?.risk);
-  return r ? RISK[r].color : '#8899aa';        // 예측 없음/범위 밖 = 중립
+  return r ? RISK[r].color : '#8899aa';        // 예측 없음/판별 불가 = 중립
 }
 function riskLabelOf(site) {
-  // 2026-07-19: 예측 범위 밖(no_coverage)은 '예측 없음'과 구분해 표시 —
-  //   서버가 주는 risk_label("예측 범위 밖")을 그대로 쓴다(라벨 SSOT=백엔드).
-  if (site?.no_coverage || site?.noCoverage) return site?.risk_label || '예측 범위 밖';
+  // 2026-07-19: 예측 판별 불가(no_coverage)는 '예측 없음'과 구분해 표시 —
+  //   서버가 주는 risk_label("예측 판별 불가")을 그대로 쓴다(라벨 SSOT=백엔드).
+  if (site?.no_coverage || site?.noCoverage) return site?.risk_label || '예측 판별 불가';
   const r = normalizeRisk(site?.risk);
   return r ? RISK[r].label : '예측 없음';
 }
@@ -379,12 +379,12 @@ export default function FarmDetailCard({ site, viewDate, onClose, maxH, onDragHa
                     )}
                     {latest?.no_coverage && (
                       <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginLeft: 8, fontWeight: 400 }}>
-                        모델 데이터 커버리지 밖 — 예측 제공 불가
+                        모델 무반응 구간 — 예측 판별 불가
                       </span>
                     )}
                   </div>
                   {/* 보조: 예측 강도(ADI) — 색을 주지 않는다(축이 다름).
-                      범위 밖 어장은 숨긴다 — 죽은 입력의 stage 0·ADI 0.0이 "정상"으로 읽히는 잔재 방지(리뷰 지적) */}
+                      판별 불가 어장은 숨긴다 — 죽은 입력의 stage 0·ADI 0.0이 "정상"으로 읽히는 잔재 방지(리뷰 지적) */}
                   {!latest?.no_coverage && (
                     <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontFamily: 'Courier New', marginTop: 3 }}>
                       예측 강도 {STAGE_LABEL[latest?.stage] ?? '?'} (stage {latest?.stage}

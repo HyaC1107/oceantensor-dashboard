@@ -773,7 +773,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
         warn:    preds?.farms[String(p.gid)]?.warn ?? null,
         adi7:    preds?.farms[String(p.gid)]?.adi7 ?? null,
         outOfGrid: preds?.outOfGrid.has(String(p.gid)) ?? false,
-        // 예측 범위 밖(cube 실커버리지 밖 — 입력 부재/격자 밖). 백엔드 no_coverage SSOT.
+        // 예측 판별 불가(모델 전 기간 무반응 또는 격자 밖). 입력 데이터는 존재함. 백엔드 no_coverage SSOT.
         noCoverage: preds?.farms[String(p.gid)]?.no_coverage ?? false,
         risk,
         severity: scoreSev(score, risk),
@@ -890,10 +890,10 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
             const oog   = preds?.outOfGrid.has(String(p.gid));
 
             // 2026-07-17: '전일 대비 급등(Δwarn)' 표시 제거 — 무작위 이하 지표였다(AUC 0.385).
-            // 2026-07-19: 예측 범위 밖(no_coverage) 어장은 warn%를 아예 보여주지 않는다 —
+            // 2026-07-19: 예측 판별 불가(no_coverage) 어장은 warn%를 아예 보여주지 않는다 —
             //   빈 입력의 0.01%가 "발생확률 0%(안전)"처럼 읽히는 것 자체가 오정보다.
             const detail = entry?.no_coverage
-              ? '<span style="color:#9AA8BF">모델 예측 범위 밖 — 입력 데이터 없음</span>'
+              ? '<span style="color:#9AA8BF">모델 무반응 구간 — 예측 판별 불가</span>'
               : entry
               ? `${sev} · 7일내 발생확률 ${(entry.warn * 100).toFixed(0)}%`
                 // oog ⊂ no_coverage 라 평상시엔 도달 불가 — 백엔드 마스킹이 꺼진(구 팩 폴백 등)
@@ -1146,11 +1146,11 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount[k]}</span>
             </div>
           ))}
-          {/* 2026-07-19: 예측 범위 밖 — cube 실커버리지 밖 어장을 '정상(초록)'으로 팔지 않는다 */}
+          {/* 2026-07-19: 모델이 한 번도 반응한 적 없는 어장을 '정상(초록)'으로 팔지 않는다 */}
           {riskCount.noCoverage > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: NO_DATA_COLOR, flexShrink: 0 }}/>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 700, minWidth: 62 }}>범위 밖</span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 700, minWidth: 62 }}>판별 불가</span>
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontFamily: 'Courier New' }}>{riskCount.noCoverage}</span>
             </div>
           )}
@@ -1161,7 +1161,7 @@ export default function MapPanel({ onSiteSelect, selectedSite, isAnalyzing, onCl
             🔴 고위험 = 발생확률 {((preds?.riskThresholds?.sustained ?? 0.5) * 100).toFixed(0)}% 이상<br/>
             🟡 주의 = {((preds?.riskThresholds?.watch ?? 0.2) * 100).toFixed(0)}% 이상<br/>
             <span style={{ opacity: 0.75 }}>※ 색 = 7일내 발생확률. 강도(ADI 4단계)는 어장 선택 시 표시</span><br/>
-            <span style={{ opacity: 0.75 }}>⚪ 범위 밖 = 모델 데이터 커버리지 밖 — 예측 제공 불가(안전 의미 아님)</span>
+            <span style={{ opacity: 0.75 }}>⚪ 판별 불가 = 모델 전 기간 무반응/격자 밖 — 신뢰할 예측 없음(안전 의미 아님)</span>
           </div>
         </div>
 
