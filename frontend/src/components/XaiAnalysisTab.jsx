@@ -17,7 +17,7 @@ import { ALL_FARMS, getFarm } from '../data/realFarms';
 import FarmPicker from './FarmPicker';
 import { farmDummy } from '../data/farmDummy';
 import { fetchRealSensorByLatLon, provenanceLabel } from '../data/realSensor';
-import { RISK, STAGE_LABEL, normalizeRisk, loadPredictions } from '../data/v13Predictions';
+import { RISK, STAGE_LABEL, normalizeRisk, loadPredictions, MODEL_NAME } from '../data/v13Predictions';
 import { XAI_EXPLANATIONS, statusToKey, SEVERITY_COLOR } from '../data/xaiExplanations';
 import XaiHeatmapOverlay from './XaiHeatmapOverlay';
 import ForecastChart from './ForecastChart';
@@ -171,13 +171,13 @@ export default function XaiAnalysisTab({ initialFarmId = null }) {
           {/* ★ 주 지표 = v13 예측 (지도와 동일 값·동일 등급) */}
           {v13Loading ? (
             <div style={{ ...st.wbiBadge, borderColor: 'rgba(0,229,255,0.3)' }}>
-              <span style={st.wbiLabel}>STMMT v13</span>
+              <span style={st.wbiLabel}>{MODEL_NAME}</span>
               <span style={{ ...st.wbiVal, color: 'rgba(0,229,255,0.6)', fontSize: 16 }}>LOADING</span>
             </div>
           ) : riskStyle ? (
             <div style={{ ...st.wbiBadge, borderColor: riskStyle.color, background: riskStyle.color + '18' }}>
               {/* 팩의 최신 예측일 — 오늘이 비양식기면 지난 시즌 마지막 날이다. '현재'로 오해되지 않게 날짜 명시 */}
-              <span style={st.wbiLabel}>STMMT v13 · 7일내 발생확률</span>
+              <span style={st.wbiLabel}>{MODEL_NAME} · 7일내 발생확률</span>
               <span style={{ ...st.wbiVal, color: riskStyle.color }}>{(v13.warn * 100).toFixed(1)}%</span>
               <span style={{ ...st.wbiTag, background: riskStyle.color }}>{riskStyle.label}</span>
               <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'Courier New,monospace', marginLeft: 6 }}>
@@ -186,7 +186,7 @@ export default function XaiAnalysisTab({ initialFarmId = null }) {
             </div>
           ) : (
             <div style={{ ...st.wbiBadge, borderColor: 'rgba(255,255,255,0.2)' }}>
-              <span style={st.wbiLabel}>STMMT v13 예측</span>
+              <span style={st.wbiLabel}>{MODEL_NAME} 예측</span>
               <span style={{ ...st.wbiVal, color: 'rgba(190,205,225,0.8)', fontSize: 13 }}>
                 {v13?.no_coverage ? '예측 판별 불가' : '예측 없음'}
               </span>

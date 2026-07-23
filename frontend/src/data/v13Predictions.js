@@ -13,6 +13,10 @@
  */
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+/** 화면에 표시할 모델명 — 배포별로 다르다(메인=v13, app-team=팀 xattn).
+ *  빌드 시 VITE_MODEL_NAME 로 주입, 없으면 v13 기본값. */
+export const MODEL_NAME = import.meta.env.VITE_MODEL_NAME || 'STMMT v13';
+
 let _cache = null;      // { date, farms, outOfGrid:Set }
 let _inflight = null;
 

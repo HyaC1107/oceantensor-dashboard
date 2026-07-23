@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchRealSensorByLatLon, fetchRealSensorHistoryByLatLon, provenanceLabel } from '../../data/realSensor';
-import { STAGE_LABEL, RISK, normalizeRisk } from '../../data/v13Predictions';
+import { STAGE_LABEL, RISK, normalizeRisk, MODEL_NAME } from '../../data/v13Predictions';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -341,8 +341,8 @@ export default function FarmDetailCard({ site, viewDate, onClose, maxH, onDragHa
           )}
         </div>
 
-        {/* ② STMMT v13 예측 — 이 어장의 실제 예측 (근사 아님) */}
-        <SectionLabel>STMMT v13 황백화 예측</SectionLabel>
+        {/* ② 모델 예측 — 이 어장의 실제 예측 (근사 아님) */}
+        <SectionLabel>{MODEL_NAME} 황백화 예측</SectionLabel>
         <div style={{
           background: 'rgba(0,229,255,0.04)',
           border: '1px solid rgba(0,229,255,0.15)', borderRadius: 8, padding: '14px 14px', marginBottom: 14,
@@ -396,7 +396,7 @@ export default function FarmDetailCard({ site, viewDate, onClose, maxH, onDragHa
                   padding: '4px 10px', borderRadius: 4, fontSize: 10,
                   background: `${lc}18`, border: `1px solid ${lc}55`, color: lc,
                   fontFamily: 'Courier New', letterSpacing: 1,
-                }}>STMMT v13</div>
+                }}>{MODEL_NAME}</div>
               </div>
               <div style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'Courier New', letterSpacing: 2, marginBottom: 6 }}>
