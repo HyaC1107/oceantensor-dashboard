@@ -28,11 +28,14 @@ def build_rag_prompt(
     Returns:
         (system_prompt, user_prompt) 튜플
     """
-    # 참고 문서 섹션
-    doc_section = "\n\n".join(
-        f"[참고 {i+1}] {doc.metadata.get('title', '')} (출처: {doc.metadata.get('source', '?')})\n{doc.page_content}"
-        for i, doc in enumerate(retrieved_docs)
-    )
+    # 참고 문서 섹션 — 검색 실패/결과없음이면 LLM에 그 사실을 명시(없는 근거를 지어내지 않도록)
+    if retrieved_docs:
+        doc_section = "\n\n".join(
+            f"[참고 {i+1}] {doc.metadata.get('title', '')} (출처: {doc.metadata.get('source', '?')})\n{doc.page_content}"
+            for i, doc in enumerate(retrieved_docs)
+        )
+    else:
+        doc_section = "(문서 검색 결과 없음 — 참고 문서 없이 일반 지식 범위에서만 답변하고, 불확실하면 모른다고 답할 것)"
 
     # 센서 컨텍스트 섹션
     sensor_section = ""

@@ -89,16 +89,23 @@ class HwangbaekRetriever(BaseRetriever):
         raise NotImplementedError("동기 경로 미지원 — ainvoke()로 호출할 것 (앱 전체가 async)")
 
     async def _aget_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
-        embedder = get_embedder()
-        q_vec = embedder.embed_query(query)
+        """DB 연결 실패 시 예외를 던지지 않고 빈 리스트 반환 — RAG 전체가 죽지 않고
+        '문서 없음' 경로로 자연 강등되게 한다(LLM은 일반지식으로, 템플릿은 안내문으로)."""
+        try:
+            embedder = get_embedder()
+            q_vec = embedder.embed_query(query)
 
-        stmt = (
-            select(RAGDocument)
-            .order_by(RAGDocument.embedding.cosine_distance(q_vec))
-            .limit(self.top_k)
-        )
-        result = await self.session.execute(stmt)
-        rows = result.scalars().all()
+            stmt = (
+                select(RAGDocument)
+                .order_by(RAGDocument.embedding.cosine_distance(q_vec))
+                .limit(self.top_k)
+            )
+            result = await self.session.execute(stmt)
+            rows = result.scalars().all()
+        except Exception as e:
+            print(f"[RAG] 문서 검색 실패(DB 연결 문제 등) — 문서 없이 진행: {e}")
+            return []
+
         return [
             Document(
                 page_content=r.content,
