@@ -26,7 +26,7 @@ async def get_db():
 
 
 async def init_db():
-    from app.models import sensor, feature, prediction, audit, farm, weather, dam  # noqa: F401
+    from app.models import sensor, feature, prediction, audit, farm, weather, dam, rag_document  # noqa: F401
 
     try:
         async with engine.begin() as conn:

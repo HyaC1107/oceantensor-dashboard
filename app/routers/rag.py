@@ -48,7 +48,7 @@ async def rag_query(
             }
         )
 
-    # 센서 컨텍스트 (선택)
+    # 센서 컨텍스트 (선택) — "Personal RAG": 해당 어장 실측 근거로 답변 보강
     sensor_ctx = None
     if req.include_sensor_context:
         from sqlalchemy import select, desc
@@ -58,14 +58,14 @@ async def rag_query(
         )
         row = result.scalar_one_or_none()
         if row:
-            din = (row.no3_nitrogen or 0) + (row.nh4_nitrogen or 0)
-            dip = 0.82
+            # OceanSensorRaw엔 DIP(인) 컬럼 자체가 없음 — 실측 없는 값을 지어내지 않는다.
+            din = (row.no3_nitrogen or 0) + (row.nh4_nitrogen or 0) if (row.no3_nitrogen is not None or row.nh4_nitrogen is not None) else None
             raw_data = {
                 "water_temp": row.water_temp,
                 "dissolved_oxygen": row.dissolved_oxygen,
                 "din": din,
-                "dip": dip,
-                "np_ratio": round(din / dip, 2) if dip else 0,
+                "dip": None,  # 미측정 — build_llm_context가 "DIP 미측정"으로 표기
+                "np_ratio": None,
                 "salinity": row.salinity,
             }
             ctx = build_llm_context(raw_data, farm_id=req.farm_id)
@@ -74,10 +74,10 @@ async def rag_query(
                 "sensor_summary": ctx["sensor_summary"],
             }
 
-    # RAG 체인 실행
+    # RAG 체인 실행 (LangChain 리트리버 → pgvector 검색 → Gemini/Claude/템플릿)
     from rag.rag_chain import get_chain
     chain = get_chain()
-    result = chain.query(req.query, sensor_context=sensor_ctx, max_tokens=512)
+    result = await chain.aquery(req.query, db, sensor_context=sensor_ctx, max_tokens=512)
 
     return RAGResponse(
         query=result["query"],
@@ -89,20 +89,27 @@ async def rag_query(
 
 
 @router.get("/docs")
-async def list_docs():
-    """내장 황백화 지식베이스 문서 목록 조회."""
-    from rag.embedder import BUILTIN_DOCS
+async def list_docs(db: AsyncSession = Depends(get_db)):
+    """황백화 지식베이스 문서 목록 조회 (docs/active 기술문서 + 연구자료 코퍼스)."""
+    from sqlalchemy import select
+    from app.models.rag_document import RAGDocument
+    result = await db.execute(select(RAGDocument.doc_id, RAGDocument.title, RAGDocument.source, RAGDocument.tags))
     return [
-        {"id": d["id"], "title": d["title"], "tags": d["tags"]}
-        for d in BUILTIN_DOCS
+        {"id": r.doc_id, "title": r.title, "source": r.source, "tags": r.tags or []}
+        for r in result.all()
     ]
 
 
 @router.get("/docs/{doc_id}")
-async def get_doc(doc_id: str):
-    """특정 문서 상세 내용 조회."""
-    from rag.embedder import BUILTIN_DOCS
-    doc = next((d for d in BUILTIN_DOCS if d["id"] == doc_id), None)
+async def get_doc(doc_id: str, db: AsyncSession = Depends(get_db)):
+    """특정 문서 청크 상세 내용 조회."""
+    from sqlalchemy import select
+    from app.models.rag_document import RAGDocument
+    result = await db.execute(select(RAGDocument).where(RAGDocument.doc_id == doc_id))
+    doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail=f"문서 없음: {doc_id}")
-    return doc
+    return {
+        "id": doc.doc_id, "title": doc.title, "content": doc.content,
+        "source": doc.source, "source_type": doc.source_type, "tags": doc.tags or [],
+    }
