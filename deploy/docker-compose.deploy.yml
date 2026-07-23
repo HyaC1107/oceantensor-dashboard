@@ -14,7 +14,7 @@ services:
     environment:
       USE_MOCK_DATA: "true"
       # 실제 DB 연동 전환 시: USE_MOCK_DATA=false + DATABASE_URL 지정
-      # DATABASE_URL: "postgresql+asyncpg://oceantensor_user:<REDACTED>@<db-host>:5432/oceantensor_db"
+      # DATABASE_URL: "postgresql+asyncpg://<DB_USER>:<DB_PASSWORD>@<db-host>:5432/oceantensor_db"
       # XAI LLM 라이브(선택): GEMINI_API_KEY 넣으면 Gemini, 없으면 템플릿 폴백
       # GEMINI_API_KEY: "${GEMINI_API_KEY}"
     expose:

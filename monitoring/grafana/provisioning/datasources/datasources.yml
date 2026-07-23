@@ -21,7 +21,7 @@ datasources:
     database: oceantensor_db
     user: oceantensor_user
     secureJsonData:
-      password: "<REDACTED>"
+      password: "$__env{LOCAL_DB_PASSWORD}"  # docker-compose.yml의 LOCAL_DB_PASSWORD와 동일 값 사용
     jsonData:
       sslmode: disable
       postgresVersion: 1700

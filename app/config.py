@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://oceantensor_user:<REDACTED>@localhost:5433/oceantensor_db"
+    # 실제 값은 .env의 DATABASE_URL로 채운다 — 여기 기본값은 .env 없을 때의 안전한 자리표시자일 뿐
+    database_url: str = "postgresql+asyncpg://user:changeme@localhost:5433/oceantensor_db"
     # NIFS 개별 키
     nifs_api_key_femosealist: str = ""
     nifs_api_key_risalist: str = ""

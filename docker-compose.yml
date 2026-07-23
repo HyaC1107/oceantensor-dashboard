@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: oceantensor_db
       POSTGRES_USER: oceantensor_user
-      POSTGRES_PASSWORD: "<REDACTED>"
+      POSTGRES_PASSWORD: "${LOCAL_DB_PASSWORD:-localdev_change_me}"  # 로컬 전용 — .env에 LOCAL_DB_PASSWORD로 오버라이드
     ports:
       - "5433:5432"
     volumes:
